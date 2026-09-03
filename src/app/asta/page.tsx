@@ -1,43 +1,39 @@
-import { publicState, defaultManagers } from "@/lib/auction-store";
+import { publicState, writableDb } from "@/lib/auction-store";
+import { defaultManagers } from "@/lib/auction-store";
 import Console from "./console";
+import Live from "./live";
 
 export default function Page() {
   const { sid, state } = publicState();
-  const defaults = defaultManagers();
-  return (
-    <main className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold">Asta</h1>
-      {state === null ? (
+  if (sid === null || state === null) {
+    return (
+      <main className="flex flex-col gap-4">
+        <h1 className="text-2xl font-bold">Asta</h1>
         <p className="text-sm opacity-70">Nessuna asta. Compila nomi e prepara.</p>
-      ) : (
-        <section className="rounded border bg-white p-3 text-sm">
-          <p>Stato: <b>{state.session.stato}</b> · dataset: <b>{state.session.dataset || "—"}</b> · v{state.session.versione} · eventi {state.eventi} · acquisti {state.acquisti}</p>
-          {state.nomination && (
-            <p className="mt-1">Nominato: <b>{state.nomination.nome}</b> · {state.nomination.squadra} · {state.nomination.ruolo}</p>
-          )}
-        </section>
-      )}
-      <Console
-        sid={sid}
-        versione={state?.session.versione ?? 0}
-        stato={state?.session.stato ?? ""}
-        managers={(state?.managers ?? []).map((m) => ({ id: m.id, nome: m.nome }))}
-        defaults={defaults}
+        <Console sid={null} versione={0} stato="" managers={[]} defaults={defaultManagers()} />
+      </main>
+    );
+  }
+  const db = writableDb();
+  const topPagati = db.prepare(
+    `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo
+     FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
+     WHERE pu.session_id=? ORDER BY pu.prezzo DESC LIMIT 10`
+  ).all(sid) as { nome: string; squadra: string; chi: string; prezzo: number }[];
+  const affari = db.prepare(
+    `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo, CAST(pl.fvm/2 AS INT) AS rif
+     FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
+     WHERE pu.session_id=? AND pl.fvm IS NOT NULL ORDER BY (pl.fvm/2 - pu.prezzo) DESC LIMIT 10`
+  ).all(sid) as { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
+
+  return (
+    <main className="flex flex-col gap-3">
+      <h1 className="text-2xl font-bold">Asta <span className="text-sm font-normal opacity-60">{state.session.stato} · v{state.session.versione}</span></h1>
+      <Live
+        sid={sid} versione={state.session.versione} stato={state.session.stato}
+        managers={state.managers} nomination={state.nomination ?? null}
+        topPagati={topPagati} affari={affari}
       />
-      {state !== null && (
-        <section className="flex flex-col gap-2">
-          {state.managers.map((m) => (
-            <details key={m.id} className="rounded border bg-white p-3 text-sm">
-              <summary><b>{m.nome}</b> {m.nome_squadra && `(${m.nome_squadra})`} · residui <b>{m.residui}</b> · max <b>{m.maxSpesa}</b> · P{m.slot.P.usati}/{m.slot.P.totali} D{m.slot.D.usati}/{m.slot.D.totali} C{m.slot.C.usati}/{m.slot.C.totali} A{m.slot.A.usati}/{m.slot.A.totali}</summary>
-              <ul className="mt-2">
-                {m.rosa.map((g, i) => (
-                  <li key={i}>{g.nome} · {g.squadra} · {g.ruolo} · {g.prezzo}</li>
-                ))}
-              </ul>
-            </details>
-          ))}
-        </section>
-      )}
     </main>
   );
 }

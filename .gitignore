@@ -20,6 +20,9 @@
 # production
 /build
 
+# local dev database (ricreabile con npm run import)
+/.data/
+
 # misc
 .DS_Store
 *.pem

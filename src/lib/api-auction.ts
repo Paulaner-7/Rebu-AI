@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { AuctionError } from "@/lib/auction";
+import { requireAuth } from "@/lib/api-auth";
 import { writableDb } from "@/lib/auction-store";
 import type { DatabaseSync } from "node:sqlite";
 
 export async function runAuction<T>(fn: (db: DatabaseSync, body: Record<string, never>) => T, req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH", message: "non autenticato" }, { status: 401 });
   try {
     const body = ((await req.json().catch(() => ({}))) ?? {}) as Record<string, never>;
     const out = fn(writableDb(), body);

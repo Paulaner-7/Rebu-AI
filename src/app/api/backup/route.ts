@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
+import { requireAuth } from "@/lib/api-auth";
 import { dumpBackup, restoreBackup } from "@/lib/auction";
 
 // GET: scarica JSON backup. POST: ripristina da JSON (vietato ad asta aperta).
-export async function GET() {
+export async function GET(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const sid = latestSessionId();
   if (!sid) return NextResponse.json({ ok: false, code: "NO_ASTA" }, { status: 404 });
   const dump = dumpBackup(writableDb(), sid);
@@ -17,6 +19,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   try {
     const body = (await req.json()) as Record<string, unknown>;
     const sid = restoreBackup(writableDb(), body);

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
+import { requireAuth } from "@/lib/api-auth";
 import { writableDb } from "@/lib/auction-store";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const db = writableDb();
   const live = db.prepare("SELECT id FROM auction_sessions WHERE stato IN ('LIVE','PAUSA')").get();
   if (live) return NextResponse.json({ ok: false, code: "ASTA_APERTA", message: "Reimport vietato ad asta aperta" }, { status: 409 });

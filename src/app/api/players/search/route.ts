@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
+import { requireAuth } from "@/lib/api-auth";
 import { getState } from "@/lib/auction";
 import { searchAvailable } from "@/lib/catalog";
 
 export async function GET(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const u = new URL(req.url);
   const sid = Number(u.searchParams.get("sessionId") ?? latestSessionId() ?? 0);
   if (!sid) return NextResponse.json({ ok: true, data: [] });

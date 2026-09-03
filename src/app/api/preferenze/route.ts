@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
+import { requireAuth } from "@/lib/api-auth";
 import { setPreferenza, getState } from "@/lib/auction";
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const db = writableDb();
   const sid = latestSessionId();
   const ds = sid ? getState(db, sid).session.dataset : null;
@@ -11,6 +13,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   try {
     const body = (await req.json().catch(() => ({}))) as { officialId?: number; tipo?: "W" | "X" | null };
     const db = writableDb();

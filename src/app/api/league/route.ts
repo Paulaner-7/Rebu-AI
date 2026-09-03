@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
+import { requireAuth } from "@/lib/api-auth";
 import { updateManagers, type ManagerInput } from "@/lib/auction";
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const db = writableDb();
   const mans = db.prepare("SELECT nome, nome_squadra, note FROM managers ORDER BY id").all();
   const mod = (db.prepare("SELECT value FROM settings WHERE key='modificatore_difesa'").get() as { value: string } | undefined)?.value ?? "on";
@@ -10,6 +12,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   try {
     const body = (await req.json().catch(() => ({}))) as { managers?: ManagerInput[]; modificatore?: string };
     const db = writableDb();

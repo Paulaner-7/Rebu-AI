@@ -38,6 +38,23 @@ export function ensureExtras(db: DatabaseSync) {
   if (!cols.some((c) => c.name === "current_nomination")) {
     db.exec("ALTER TABLE auction_sessions ADD COLUMN current_nomination INTEGER");
   }
+  db.exec(`CREATE TABLE IF NOT EXISTS preferenze (
+    dataset_version TEXT NOT NULL REFERENCES dataset_versions(version),
+    official_id INTEGER NOT NULL, tipo TEXT NOT NULL CHECK (tipo IN ('W','X')), nota TEXT DEFAULT '',
+    PRIMARY KEY (dataset_version, official_id))`);
+}
+
+export function setPreferenza(db: DatabaseSync, dataset: string, officialId: number, tipo: "W" | "X" | null) {
+  if (tipo === null) {
+    db.prepare("DELETE FROM preferenze WHERE dataset_version=? AND official_id=?").run(dataset, officialId);
+    return;
+  }
+  db.prepare("INSERT INTO preferenze (dataset_version, official_id, tipo) VALUES (?,?,?) ON CONFLICT(dataset_version, official_id) DO UPDATE SET tipo=excluded.tipo").run(dataset, officialId, tipo);
+}
+
+export function getPreferenze(db: DatabaseSync, dataset: string): Map<number, string> {
+  const rows = db.prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(dataset) as { o: number; tipo: string }[];
+  return new Map(rows.map((r) => [r.o, r.tipo]));
 }
 
 type Session = {
@@ -174,6 +191,65 @@ export function updateManagers(db: DatabaseSync, sid: number, managers: ManagerI
     const v = bump(db, { ...s });
     db.exec("COMMIT");
     return v;
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+export function dumpBackup(db: DatabaseSync, sid: number) {
+  const s = getSession(db, sid);
+  return {
+    app: "Rebu AI", backup: 1, at: new Date().toISOString(),
+    dataset: s.dataset_version, stato: s.stato, versione: s.state_version,
+    managers: db.prepare("SELECT nome, nome_squadra, note, is_owner, crediti_iniziali FROM managers ORDER BY id").all(),
+    events: db.prepare("SELECT seq, tipo, payload, idempotency_key, compensates_id FROM auction_events WHERE session_id=? ORDER BY seq").all(sid),
+  };
+}
+
+// Ripristino: ricrea sessione+rose dagli eventi (fonte verità). Stato PAUSA per verifica.
+export function restoreBackup(db: DatabaseSync, b: Record<string, unknown>) {
+  ensureExtras(db);
+  if (b.app !== "Rebu AI" || b.backup !== 1) throw new AuctionError("BACKUP", "File non valido.");
+  const live = db.prepare("SELECT id FROM auction_sessions WHERE stato IN ('LIVE','PAUSA')").get();
+  if (live) throw new AuctionError("ASTA_APERTA", "Ripristino vietato ad asta aperta.");
+  const mans = b.managers as { nome: string; nome_squadra: string; note: string; is_owner: number | boolean; crediti_iniziali: number }[];
+  checkManagers(mans.map((m) => ({ nome: m.nome, nome_squadra: m.nome_squadra, note: String(m.note ?? ""), is_owner: !!m.is_owner })));
+  db.exec("BEGIN");
+  try {
+    db.exec("DELETE FROM agent_runs; DELETE FROM purchases; DELETE FROM auction_events; DELETE FROM auction_sessions; DELETE FROM managers;");
+    db.exec("DELETE FROM sqlite_sequence WHERE name IN ('managers','auction_sessions','auction_events','purchases','agent_runs')");
+    const ins = db.prepare("INSERT INTO managers (nome, nome_squadra, note, is_owner, crediti_iniziali) VALUES (?,?,?,?,?)");
+    mans.forEach((m) => ins.run(m.nome, m.nome_squadra ?? "", m.note ?? "", m.is_owner ? 1 : 0, m.crediti_iniziali ?? 500));
+    const sid = Number(db.prepare("INSERT INTO auction_sessions (dataset_version, stato, state_version) VALUES (?,?,?)")
+      .run(b.dataset as string, "PAUSA", (b.versione as number) ?? 0).lastInsertRowid);
+    const evs = b.events as { seq: number; tipo: string; payload: string; idempotency_key: string | null; compensates_id: number | null }[];
+    const evId = new Map<number, number>();
+    for (const e of evs) {
+      const comp = e.compensates_id ? evId.get(e.compensates_id) ?? null : null;
+      const r = db.prepare("INSERT INTO auction_events (session_id, seq, tipo, payload, idempotency_key, compensates_id) VALUES (?,?,?,?,?,?)")
+        .run(sid, e.seq, e.tipo, e.payload, e.idempotency_key, comp);
+      evId.set(e.seq, Number(r.lastInsertRowid));
+    }
+    // rose ricostruite dai SELL non compensati
+    const compd = new Set(evs.filter((e) => e.tipo === "COMPENSATE").map((e) => JSON.parse(e.payload).dettaglio?.official_id));
+    void compd;
+    const compensatedSeq = new Set<number>();
+    const bySeq = new Map(evs.map((e) => [e.seq, e]));
+    for (const e of evs) {
+      if (e.tipo !== "COMPENSATE") continue;
+      const target = (bySeq.get(e.compensates_id ?? -1));
+      if (target) compensatedSeq.add(target.seq);
+    }
+    const insP = db.prepare("INSERT INTO purchases (session_id, player_id, manager_id, prezzo, source_event_id) VALUES (?,?,?,?,?)");
+    for (const e of evs) {
+      if (e.tipo !== "SELL" || compensatedSeq.has(e.seq)) continue;
+      const p = JSON.parse(e.payload);
+      const prow = db.prepare("SELECT id FROM players WHERE dataset_version=? AND official_id=?").get(b.dataset as string, p.official_id) as { id: number };
+      insP.run(sid, prow.id, p.manager_id, p.prezzo, evId.get(e.seq) ?? null);
+    }
+    db.exec("COMMIT");
+    return sid;
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;

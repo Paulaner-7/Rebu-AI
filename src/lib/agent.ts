@@ -8,7 +8,7 @@ export const GO_ENDPOINT = "https://opencode.ai/zen/go/v1/chat/completions";
 export const GO_MODELS = "https://opencode.ai/zen/go/v1/models";
 export const DEFAULT_MODEL = "muse-spark-1.3-contributor";
 
-export const SYSTEM_PROMPT = `Sei Rebu AI, assistente d'asta per il Fantacalcio Classic 2026/27 (8 squadre, 500 crediti, rose 3P/8D/8C/6A, modificatore difesa se attivo). Rispondi in italiano, breve e operativo. Non inventi MAI numeri: quotazioni, prezzi medi, crediti e statistiche arrivano solo dai tool; se un dato manca, dillo. Non decidi al posto dell'utente: proponi azione e prezzo massimo motivandoli, e ricorda che la decisione finale è sua, anche quando l'asta si scalda. Chiudi OGNI risposta su giocatore con blocco JSON: {"azione":"COMPRA|RILANCIA_FINO_A|PASSA","prezzoMassimoConsigliato":n,"confidenza":"BASSA|MEDIA|ALTA","motivazioni":["max 3"],"alternative":["Nomi"],"fonti":["tool usati"]}.`;
+export const SYSTEM_PROMPT = `Sei Rebu AI, assistente d'asta per il Fantacalcio Classic 2026/27 (8 squadre, 500 crediti, rose 3P/8D/8C/6A, modificatore difesa se attivo). Rispondi in italiano, breve e operativo. Non inventi MAI numeri: quotazioni, prezzi medi, crediti e statistiche arrivano solo dai tool; se un dato manca, dillo. Rispetta le preferenze utente: W = pupillo (spingilo), X = escluso (sconsiglialo salvo richiesta esplicita). Non decidi al posto dell'utente: proponi azione e prezzo massimo motivandoli, e ricorda che la decisione finale è sua, anche quando l'asta si scalda. Chiudi OGNI risposta su giocatore con blocco JSON: {"azione":"COMPRA|RILANCIA_FINO_A|PASSA","prezzoMassimoConsigliato":n,"confidenza":"BASSA|MEDIA|ALTA","motivazioni":["max 3"],"alternative":["Nomi"],"fonti":["tool usati"]}.`;
 
 export type Contract = {
   azione: "COMPRA" | "RILANCIA_FINO_A" | "PASSA";
@@ -64,7 +64,8 @@ export function execTool(db: DatabaseSync, sid: number, dataset: string, name: s
       const p = db.prepare("SELECT * FROM players WHERE dataset_version=? AND official_id=?").get(dataset, Number(args.officialId));
       if (!p) return { errore: "assente" };
       const r = p as Record<string, unknown>;
-      return { ...r, riferimento: prezzoRiferimento(db, dataset, Number(args.officialId)) };
+      const pref = db.prepare("SELECT tipo FROM preferenze WHERE dataset_version=? AND official_id=?").get(dataset, Number(args.officialId)) as { tipo: string } | undefined;
+      return { ...r, riferimento: prezzoRiferimento(db, dataset, Number(args.officialId)), preferenza: pref?.tipo ?? null };
     }
     case "statoAsta": return getState(db, sid).session;
     case "statoSquadra": return managerStates(db, sid).find((m) => m.id === Number(args.managerId)) ?? { errore: "assente" };

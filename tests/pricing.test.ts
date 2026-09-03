@@ -18,7 +18,7 @@ function dbF() {
   const ins = db.prepare(`INSERT INTO players (dataset_version, official_id, nome, nome_norm, squadra, ruolo_classic, ruolo_mantra, qt_a, fvm, is_titolare, qt_2526)
     VALUES ('t',?,?,?,?,?,?,?, ?,0,?)`);
   ins.run(1, "Top A", "top a", "Roma", "A", "Pc", 38, 450, 40);   // rif 225
-  ins.run(2, "Mid C", "mid c", "Como", "C", "X", 20, null, 22);    // rif mediana(22 Qt25/26, 20 Qt.A)=21
+  ins.run(2, "Mid C", "mid c", "Como", "C", "X", 20, null, 22);
   ins.run(3, "Low D", "low d", "Lecce", "D", "Dc", 5, null, null); // rif media reparto
   ins.run(4, "Top D", "top d", "Inter", "D", "E", 31, 240, 30);    // mod boost
   for (let i = 5; i <= 40; i++) ins.run(i, `Riemp ${i}`, `riemp ${i}`, "Napoli", i % 2 ? "C" : "D", "X", 5, null, null);

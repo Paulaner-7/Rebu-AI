@@ -15,9 +15,9 @@ Stato: app pronta (build prod verde, collaudo 200 acquisti OK). Manca solo quest
 4. Deploy → apri URL → login con codice → /api/health deve dire `"provider":"supabase"`.
 
 ## 3. Dati in produzione
-Dopo deploy: da locale con `.env.local` puntato a Supabase? No — Fase attuale usa
-SQLite locale. Migrazione dati listone→Supabase prevista prima dell'asta vera
-(adapter già isolato in `src/lib/db.ts`). Chiedimi "migrazione Supabase" quando hai le chiavi.
+Script pronto: `SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/migrate-supabase.mjs`
+spinge dataset locale (533 giocatori, guida, preferenze, managers) su Supabase.
+Prova prima con `--dry`. L'app passa a Supabase quando mi chiedi il passaggio runtime.
 
 ## 4. Pre-asta (il giorno prima)
 - Reimporta listone/guida freschi in `dati/` → `npm run import` → commit.

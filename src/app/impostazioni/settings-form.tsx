@@ -74,6 +74,25 @@ export default function SettingsForm({ editable, astaAperta }: { editable: boole
       </section>
 
       <section className="rounded border bg-white p-3">
+        <h2 className="font-bold">Backup emergenza</h2>
+        <div className="mt-2 flex gap-2">
+          <a href="/api/backup" className="min-h-[48px] flex-1 rounded border p-3 text-center">Scarica backup JSON</a>
+          <label className="min-h-[48px] flex-1 cursor-pointer rounded border p-3 text-center">
+            Ripristina
+            <input type="file" accept=".json" className="hidden" onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              if (!confirm("Ripristinare backup? Asta corrente sostituita (vietato in LIVE/PAUSA).")) return;
+              const r = await fetch("/api/backup", { method: "POST", headers: { "Content-Type": "application/json" }, body: await f.text() });
+              const j = await r.json();
+              setMsg(j.ok ? `Ripristinato in PAUSA: verifica e riprendi.` : `Bloccato: ${j.message}`);
+            }} />
+          </label>
+        </div>
+        <p className="mt-1 text-xs opacity-60">Se telefono/PC muore: ripristina da altro dispositivo, verifica rose, riprendi.</p>
+      </section>
+
+      <section className="rounded border bg-white p-3">
         <h2 className="font-bold">Dataset</h2>
         <button disabled={astaAperta} onClick={async () => {
           setLog("Import in corso…");

@@ -12,7 +12,8 @@ const MOB = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) RebuMobile";
 const rep = { checks: [], ok: true };
 let cookie = "";
 let minResidui = 500;
-const t = (ms) => new Promise((r) => setTimeout(r, ms));
+const t = (ms: number) => new Promise((r) => setTimeout(r, ms));
+void t;
 
 async function api(method, path, body, ua = DESK) {
   const r = await fetch(BASE + path, {

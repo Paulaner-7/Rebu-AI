@@ -70,6 +70,16 @@ export function generateLegheFantacalcioCsv(input: ExportInput, knownIds: Set<nu
   return lines.join("\n") + "\n";
 }
 
+// Backup parziale mid-asta: stesso formato $,$,$ ma solo acquistati (emergenza, non import).
+export function partialBackupCsv(input: ExportInput): string {
+  const lines: string[] = [`# BACKUP ${input.league.name} ${(input as { at?: string }).at ?? ""} - non importare`];
+  for (const t of [...input.teams].sort((a, b) => a.displayOrder - b.displayOrder)) {
+    lines.push("$,$,$");
+    for (const p of t.players.filter((x) => x.status === "purchased")) lines.push(`${t.name},${p.officialPlayerId},${p.purchasePrice}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 export function buildLegheExportFilename(leagueName: string, date: Date): string {
   const slug = leagueName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "lega";

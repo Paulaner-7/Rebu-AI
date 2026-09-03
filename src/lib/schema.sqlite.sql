@@ -87,3 +87,10 @@ CREATE TABLE IF NOT EXISTS strategy_notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   testo TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS preferenze (
+  dataset_version TEXT NOT NULL REFERENCES dataset_versions(version),
+  official_id INTEGER NOT NULL,
+  tipo TEXT NOT NULL CHECK (tipo IN ('W','X')),
+  nota TEXT DEFAULT '',
+  PRIMARY KEY (dataset_version, official_id)
+);

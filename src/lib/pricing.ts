@@ -125,12 +125,15 @@ export function prossimeChiamate(db: DatabaseSync, sid: number, managerId: numbe
        AND NOT EXISTS (SELECT 1 FROM purchases pu WHERE pu.session_id=? AND pu.player_id=p.id)`
   ).all(s.d, sid) as { o: number; nome: string; squadra: string; ruolo: string; qt: number | null; fvm: number | null; tit: number }[];
   const maxQt: Record<string, number> = {};
+  const pref = db.prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(s.d) as { o: number; tipo: string }[];
+  const prefMap = new Map(pref.map((p) => [p.o, p.tipo]));
   for (const r of avail) maxQt[r.ruolo] = Math.max(maxQt[r.ruolo] ?? 1, r.qt ?? 1);
   const availPer: Record<string, number> = {};
   const needLeague: Record<string, number> = {};
   for (const r of avail) availPer[r.ruolo] = (availPer[r.ruolo] ?? 0) + 1;
   for (const m of ms) for (const [ruolo, t] of Object.entries(rosa)) needLeague[ruolo] = (needLeague[ruolo] ?? 0) + (t - m.slot[ruolo].usati);
-  const rank = avail.map((r) => {
+  const rank = avail.flatMap((r) => {
+    if (prefMap.get(r.o) === "X") return [];
     const vuotiMiei = rosa[r.ruolo] - mine.slot[r.ruolo].usati;
     const need = vuotiMiei > 0 ? 1 + vuotiMiei : 0.2;
     const quality = (r.qt ?? 1) / (maxQt[r.ruolo] ?? 1);
@@ -138,12 +141,13 @@ export function prossimeChiamate(db: DatabaseSync, sid: number, managerId: numbe
     let bonusMod = 0;
     const motivi: string[] = [];
     if (r.tit) { bonusMod += 0; motivi.push("titolare XI"); }
+    if (prefMap.get(r.o) === "W") { bonusMod += 150; motivi.push("pupillo"); }
     if (mod && r.ruolo === "D" && (r.qt ?? 0) >= 14) { bonusMod += 8; motivi.push("modificatore: top D"); }
     if (mod && r.ruolo === "P" && (r.qt ?? 0) >= 15) { bonusMod += 8; motivi.push("modificatore: P clean-sheet"); }
     if (vuotiMiei > 0) motivi.push(`buco rosa: ${vuotiMiei} slot ${r.ruolo} liberi`);
     const score = Math.round(100 * need * (0.5 + 0.5 * quality) + (r.tit ? 10 : 0) + bonusMod + scarsita);
     return { official_id: r.o, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo, score, motivi,
-      formula: "100×need×(0.5+0.5×qualità) + 10 se XI + 8 se bonusMod + 2×scarsità" };
+      formula: "100×need×(0.5+0.5×qualità) + 10 se XI + 8 se bonusMod + 150 se pupillo (X esclusi) + 2×scarsità" };
   });
   rank.sort((a, b) => b.score - a.score);
   return { top: rank.slice(0, top), modificatore: mod ? "on" : "off", formula: "need=1+slotVuotiMiei (0.2 se ruolo pieno); qualità=Qt/maxQt ruolo; scarsità=max(0,bisognoLega−disponibili)" };

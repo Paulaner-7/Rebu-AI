@@ -1,4 +1,7 @@
 import { searchPlayers, getFilterOptions, isImported, getActiveVersion } from "@/lib/store";
+import { writableDb, latestSessionId } from "@/lib/auction-store";
+import { getState } from "@/lib/auction";
+import Star from "./star";
 
 export default async function Page({
   searchParams,
@@ -9,6 +12,15 @@ export default async function Page({
   const imported = isImported();
   const { ruoli, squadre } = getFilterOptions();
   const rows = imported ? searchPlayers(q, ruolo, squadra) : [];
+  let pref = new Map<number, string>();
+  try {
+    const sid = latestSessionId();
+    if (sid) {
+      const ds = getState(writableDb(), sid).session.dataset;
+      const pr = writableDb().prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(ds) as { o: number; tipo: string }[];
+      pref = new Map(pr.map((r) => [r.o, r.tipo]));
+    }
+  } catch { /* db senza preferenze yet */ }
 
   return (
     <main className="flex flex-col gap-4">
@@ -59,9 +71,14 @@ export default async function Page({
               {rows.map((p) => (
                 <tr key={p.official_id} className="border-b">
                   <td className="py-2">
+                    <div className="flex items-start justify-between gap-2">
+                    <div>
                     <b>{p.nome}</b> <span className="opacity-60">· {p.squadra} · {p.ruolo_classic}</span>
                     {p.is_titolare ? <span className="ml-1 rounded bg-green-100 px-1 text-xs">XI</span> : null}
                     <div className="text-xs opacity-50">{p.ruolo_mantra}</div>
+                    </div>
+                    <Star officialId={p.official_id} stato={(pref.get(p.official_id) as "W" | "X") ?? null} />
+                    </div>
                   </td>
                   <td className="text-right">{p.qt_a ?? "—"}</td>
                   <td className="text-right">{p.fvm ?? "—"}</td>

@@ -3,7 +3,9 @@ import { join, dirname } from "node:path";
 import { readFileSync, mkdirSync } from "node:fs";
 import { ensureExtras, getState } from "./auction";
 
-const DB_PATH = join(process.cwd(), ".data", "rebu.db");
+// Vercel serverless: /var/task read-only, solo /tmp scrivibile (EFFIMERO: dati azzerati a ogni cold start).
+// Persistenza vera richiede switch runtime a Supabase (vedi DEPLOY.md).
+const DB_PATH = process.env.VERCEL ? join("/tmp", "rebu.db") : join(process.cwd(), ".data", "rebu.db");
 
 let db: DatabaseSync | null = null;
 

@@ -1,6 +1,8 @@
 import { publicState } from "@/lib/auction-store";
 import SettingsForm from "./settings-form";
 
+export const dynamic = "force-dynamic";
+
 export default function Page() {
   const { state } = publicState();
   const stato = state?.session.stato ?? "";

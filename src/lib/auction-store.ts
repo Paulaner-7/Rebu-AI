@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { readFileSync, mkdirSync } from "node:fs";
 import { ensureExtras, getState } from "./auction";
 
 const DB_PATH = join(process.cwd(), ".data", "rebu.db");
@@ -9,6 +9,7 @@ let db: DatabaseSync | null = null;
 
 export function writableDb(): DatabaseSync {
   if (!db) {
+    mkdirSync(dirname(DB_PATH), { recursive: true });
     db = new DatabaseSync(DB_PATH);
     db.exec("PRAGMA journal_mode = WAL");
     db.exec(readFileSync(join(process.cwd(), "src", "lib", "schema.sqlite.sql"), "utf8"));

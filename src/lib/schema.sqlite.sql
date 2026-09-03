@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS auction_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   dataset_version TEXT NOT NULL REFERENCES dataset_versions(version),
   stato TEXT NOT NULL DEFAULT 'DRAFT', reparto_corrente TEXT,
+  current_nomination INTEGER,
   state_version INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS auction_events (

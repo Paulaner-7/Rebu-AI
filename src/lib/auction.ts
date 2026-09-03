@@ -156,6 +156,37 @@ export function getState(db: DatabaseSync, sid: number) {
   };
 }
 
+export function checkManagers(managers: ManagerInput[]) {
+  if (managers.length !== 8) throw new AuctionError("MANAGERS", "Servono esattamente 8 partecipanti.");
+  const nomi = managers.map((m) => m.nome.trim()).filter(Boolean);
+  if (new Set(nomi).size !== 8) throw new AuctionError("MANAGERS", "Nomi duplicati o vuoti.");
+}
+
+export function updateManagers(db: DatabaseSync, sid: number, managers: ManagerInput[]): number {
+  const s = getSession(db, sid);
+  if (s.stato !== "PRONTA") throw new AuctionError("STATO", "Partecipanti modificabili solo prima dell'avvio.");
+  checkManagers(managers);
+  const ins = db.prepare("INSERT INTO managers (nome, nome_squadra, note, is_owner, crediti_iniziali) VALUES (?,?,?,?,500)");
+  db.exec("BEGIN");
+  try {
+    db.exec("DELETE FROM managers");
+    managers.forEach((m, i) => ins.run(m.nome.trim(), (m.nome_squadra || "").trim(), m.note || "", i === 0 ? 1 : 0));
+    const v = bump(db, { ...s });
+    db.exec("COMMIT");
+    return v;
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+export function resetAuction(db: DatabaseSync) {
+  ensureExtras(db);
+  const live = db.prepare("SELECT id FROM auction_sessions WHERE stato='LIVE'").get();
+  if (live) throw new AuctionError("ASTA_LIVE", "Asta live: metti in pausa o concludi prima del reset.");
+  db.exec("DELETE FROM purchases; DELETE FROM auction_events; DELETE FROM auction_sessions;");
+}
+
 // --- Setup: rasa manager, semina 8 da avversari.csv, nuova sessione PRONTA ---
 export function setupLeague(db: DatabaseSync, managers: ManagerInput[]): number {
   if (managers.length !== 8) throw new AuctionError("MANAGERS", "Servono esattamente 8 partecipanti.");

@@ -43,6 +43,11 @@ export default function Page() {
         topPagati={topPagati} affari={affari}
         consiglio={consiglio} inflazione={infl} prossime={next?.top ?? []} ownerNome={owner?.nome ?? ""}
       />
+      {state.session.stato === "CONCLUSA" && (
+        <a href={`/api/exports/csv?sessionId=${sid}`} className="min-h-[48px] rounded bg-black p-3 text-center font-bold text-white">
+          Scarica CSV Leghe Fantacalcio
+        </a>
+      )}
     </main>
   );
 }

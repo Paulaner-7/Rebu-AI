@@ -99,6 +99,8 @@ export async function runChat(domanda: string, model?: string) {
   const t0 = Date.now();
   const { db, sid, dataset, versione } = toolCtx();
   const key = process.env.OPENCODE_API_KEY ?? "";
+  const modSetting = db.prepare("SELECT value FROM settings WHERE key='modificatore_difesa'").get() as { value: string } | undefined;
+  const sysPrompt = SYSTEM_PROMPT + (modSetting?.value === "off" ? "\nModificatore difesa SPENTO in questa lega: non citarlo e non privilegiare difensori/portieri." : "");
   const mdl = model || (db.prepare("SELECT value FROM settings WHERE key='modello_default'").get() as { value: string } | undefined)?.value || DEFAULT_MODEL;
   const usati: string[] = [];
 
@@ -109,7 +111,7 @@ export async function runChat(domanda: string, model?: string) {
   }
 
   const messages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string; name?: string }[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: sysPrompt },
     { role: "user", content: domanda },
   ];
   let testo = "";

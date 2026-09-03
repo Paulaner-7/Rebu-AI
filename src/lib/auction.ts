@@ -184,7 +184,8 @@ export function resetAuction(db: DatabaseSync) {
   ensureExtras(db);
   const live = db.prepare("SELECT id FROM auction_sessions WHERE stato='LIVE'").get();
   if (live) throw new AuctionError("ASTA_LIVE", "Asta live: metti in pausa o concludi prima del reset.");
-  db.exec("DELETE FROM purchases; DELETE FROM auction_events; DELETE FROM auction_sessions;");
+  db.exec("DELETE FROM agent_runs; DELETE FROM purchases; DELETE FROM auction_events; DELETE FROM auction_sessions;");
+  db.exec("DELETE FROM sqlite_sequence WHERE name IN ('auction_sessions','auction_events','purchases','agent_runs')");
 }
 
 // --- Setup: rasa manager, semina 8 da avversari.csv, nuova sessione PRONTA ---
@@ -197,7 +198,8 @@ export function setupLeague(db: DatabaseSync, managers: ManagerInput[]): number 
   if (open) throw new AuctionError("ASTA_APERTA", "Esiste già asta non conclusa. Concludila prima.");
   db.exec("BEGIN");
   try {
-    db.exec("DELETE FROM purchases; DELETE FROM auction_events; DELETE FROM auction_sessions; DELETE FROM managers;");
+    db.exec("DELETE FROM agent_runs; DELETE FROM purchases; DELETE FROM auction_events; DELETE FROM auction_sessions; DELETE FROM managers;");
+    db.exec("DELETE FROM sqlite_sequence WHERE name IN ('managers','auction_sessions','auction_events','purchases','agent_runs')");
     const ins = db.prepare("INSERT INTO managers (nome, nome_squadra, note, is_owner, crediti_iniziali) VALUES (?,?,?,?,500)");
     managers.forEach((m, i) =>
       ins.run(m.nome.trim(), (m.nome_squadra || "").trim(), m.note || "", i === 0 ? 1 : 0)

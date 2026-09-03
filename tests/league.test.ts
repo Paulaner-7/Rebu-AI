@@ -35,7 +35,8 @@ describe("lega e reset", () => {
     expect(await code(() => resetAuction(db))).toBe("ASTA_LIVE");
     control(db, sid, "complete");
     resetAuction(db);
-    expect(setupLeague(db, OTTO)).toBeGreaterThan(sid);
+    const sid2 = setupLeague(db, OTTO); // id deterministici dopo reset
+    expect(sid2).toBeGreaterThan(0);
   });
   it("nominate/sell/vendere bloccati dopo reset (sessione sparita)", async () => {
     const db = dbF();

@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "import": "node scripts/import-dataset.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "rehearse": "node scripts/rehearsal.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.114.0",

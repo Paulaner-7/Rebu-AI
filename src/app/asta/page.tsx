@@ -1,6 +1,10 @@
 import { publicState, writableDb } from "@/lib/auction-store";
 import { defaultManagers } from "@/lib/auction-store";
 import { prezzoRiferimento, tettoConsigliato, inflazioneAsta, prossimeChiamate } from "@/lib/pricing";
+
+export const dynamic = "force-dynamic";
+
+const plain = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 import Console from "./console";
 import Live from "./live";
 
@@ -39,9 +43,9 @@ export default function Page() {
       <h1 className="text-2xl font-bold">Asta <span className="text-sm font-normal opacity-60">{state.session.stato} · v{state.session.versione}</span></h1>
       <Live
         sid={sid} versione={state.session.versione} stato={state.session.stato}
-        managers={state.managers} nomination={state.nomination ?? null}
-        topPagati={topPagati} affari={affari}
-        consiglio={consiglio} inflazione={infl} prossime={next?.top ?? []} ownerNome={owner?.nome ?? ""}
+        managers={plain(state.managers)} nomination={plain(state.nomination ?? null)}
+        topPagati={plain(topPagati)} affari={plain(affari)}
+        consiglio={plain(consiglio)} inflazione={plain(infl)} prossime={plain(next?.top ?? [])} ownerNome={owner?.nome ?? ""}
       />
       {state.session.stato === "CONCLUSA" && (
         <a href={`/api/exports/csv?sessionId=${sid}`} className="min-h-[48px] rounded bg-black p-3 text-center font-bold text-white">

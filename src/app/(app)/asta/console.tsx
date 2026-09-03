@@ -1,6 +1,8 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { CircleStop, Gavel, Pause, Play, TriangleAlert, Undo2, Users } from "lucide-react";
+import { btnDanger, btnGhost, btnPrimary, cx, inputCls, Panel, PanelHead } from "@/components/ui";
 
 async function post(path: string, body: object) {
   const r = await fetch(path, {
@@ -38,69 +40,103 @@ export default function Console({ sid, versione, stato, managers, defaults }: Pr
 
   return (
     <div className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()}>
-      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-700">{err}</p>}
+      {err && (
+        <p className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-danger" role="alert">
+          <TriangleAlert className="size-4 shrink-0" aria-hidden />
+          {err}
+        </p>
+      )}
       {sid === null ? (
-        <div className="flex flex-col gap-2 rounded border bg-white p-3">
-          <h2 className="font-semibold">Setup 8 squadre (nomi compilabili sul posto)</h2>
-          {names.map((n, i) => (
-            <input key={i} value={n} onChange={(e) => setNames(names.map((x, j) => (j === i ? e.target.value : x)))}
-              className="min-h-[44px] rounded border px-3 text-base" placeholder={`Partecipante ${i + 1}`} />
-          ))}
-          <button className="min-h-[44px] rounded bg-black font-semibold text-white"
-            onClick={() => go(async () => post("/api/auction/setup", {
-              managers: names.map((nome, i) => ({ nome, nome_squadra: defaults[i]?.nome_squadra ?? "", note: "", is_owner: i === 0 })),
-            }))}>Prepara asta</button>
-        </div>
+        <Panel>
+          <PanelHead icon={Users} title="Setup 8 squadre" hint="nomi compilabili sul posto" />
+          <div className="flex flex-col gap-2">
+            {names.map((n, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="tnum w-6 shrink-0 text-center font-mono text-xs font-semibold text-faint">{String(i + 1).padStart(2, "0")}</span>
+                <input
+                  value={n}
+                  onChange={(e) => setNames(names.map((x, j) => (j === i ? e.target.value : x)))}
+                  className={inputCls}
+                  placeholder={`Partecipante ${i + 1}`}
+                  aria-label={`Partecipante ${i + 1}`}
+                />
+              </div>
+            ))}
+            <button
+              className={cx(btnPrimary, "mt-2 w-full")}
+              onClick={() => go(async () => post("/api/auction/setup", {
+                managers: names.map((nome, i) => ({ nome, nome_squadra: defaults[i]?.nome_squadra ?? "", note: "", is_owner: i === 0 })),
+              }))}
+            >
+              <Gavel className="size-4" aria-hidden />
+              Prepara asta
+            </button>
+          </div>
+        </Panel>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
             {stato === "PRONTA" && (
-              <button className="min-h-[44px] rounded bg-black px-4 font-semibold text-white"
+              <button className={btnPrimary}
                 onClick={() => go(() => post("/api/auction/start", { sessionId: sid, expected: versione }))}>
-                Avvia (congela dataset)</button>
+                <Play className="size-4" aria-hidden />
+                Avvia (congela dataset)
+              </button>
             )}
             {stato === "LIVE" && (
-              <button className="min-h-[44px] rounded border px-4"
-                onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: "pause", expected: versione }))}>Pausa</button>
+              <button className={btnGhost}
+                onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: "pause", expected: versione }))}>
+                <Pause className="size-4" aria-hidden />
+                Pausa
+              </button>
             )}
             {stato === "PAUSA" && (
-              <button className="min-h-[44px] rounded border px-4"
-                onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: "resume", expected: versione }))}>Riprendi</button>
+              <button className={btnGhost}
+                onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: "resume", expected: versione }))}>
+                <Play className="size-4" aria-hidden />
+                Riprendi
+              </button>
             )}
             {(stato === "LIVE" || stato === "PAUSA") && (
               <>
-                <button className="min-h-[44px] rounded border px-4"
-                  onClick={() => go(() => post("/api/auction/undo", { sessionId: sid, expected: versione }))}>Annulla ultima</button>
-                <button className="min-h-[44px] rounded border border-red-400 px-4 text-red-700"
-                  onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: "complete", expected: versione }))}>Concludi</button>
+                <button className={btnGhost}
+                  onClick={() => go(() => post("/api/auction/undo", { sessionId: sid, expected: versione }))}>
+                  <Undo2 className="size-4" aria-hidden />
+                  Annulla ultima
+                </button>
+                <button className={btnDanger}
+                  onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: "complete", expected: versione }))}>
+                  <CircleStop className="size-4" aria-hidden />
+                  Concludi
+                </button>
               </>
             )}
           </div>
           {stato === "LIVE" && (
-            <div className="flex flex-col gap-2 rounded border bg-white p-3">
-              <h2 className="font-semibold">Nomina (Id ufficiale listone)</h2>
+            <Panel>
+              <PanelHead icon={Gavel} title="Nomina" hint="ID ufficiale listone" />
               <div className="flex gap-2">
                 <input value={oid} onChange={(e) => setOid(e.target.value)} inputMode="numeric" placeholder="es. 5841"
-                  className="min-h-[44px] flex-1 rounded border px-3 text-base" />
-                <button className="min-h-[44px] rounded bg-black px-4 font-semibold text-white"
+                  aria-label="ID ufficiale giocatore" className={inputCls} />
+                <button className={btnPrimary}
                   onClick={() => go(() => post("/api/auction/nominate", { sessionId: sid, officialId: Number(oid), expected: versione }))}>Nomina</button>
-                <button className="min-h-[44px] rounded border px-4"
+                <button className={btnGhost}
                   onClick={() => go(() => post("/api/auction/unsold", { sessionId: sid, officialId: Number(oid), expected: versione }))}>Invenduto</button>
               </div>
-              <h2 className="font-semibold">Vendi nominato</h2>
-              <div className="flex gap-2">
-                <select value={mid} onChange={(e) => setMid(e.target.value)} className="min-h-[44px] flex-1 rounded border px-2 text-base">
+              <h2 className="font-display mt-5 text-sm font-bold uppercase tracking-wide">Vendi nominato</h2>
+              <div className="mt-2 flex gap-2">
+                <select value={mid} onChange={(e) => setMid(e.target.value)} aria-label="Squadra acquirente" className={cx(inputCls, "flex-1")}>
                   <option value="">Squadra…</option>
                   {managers.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
                 </select>
                 <input value={prezzo} onChange={(e) => setPrezzo(e.target.value)} inputMode="numeric" placeholder="Prezzo"
-                  className="min-h-[44px] w-24 rounded border px-3 text-base" />
-                <button className="min-h-[44px] rounded bg-black px-4 font-semibold text-white"
+                  aria-label="Prezzo" className={cx(inputCls, "w-24")} />
+                <button className={btnPrimary}
                   onClick={() => go(() => post("/api/auction/sell", {
                     sessionId: sid, officialId: Number(oid), managerId: Number(mid), prezzo: Number(prezzo), idem: idem(), expected: versione,
                   }))}>Vendi</button>
               </div>
-            </div>
+            </Panel>
           )}
         </>
       )}

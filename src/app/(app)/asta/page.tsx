@@ -1,20 +1,24 @@
-import { publicState, writableDb } from "@/lib/auction-store";
-import { defaultManagers } from "@/lib/auction-store";
+import { publicState, writableDb, defaultManagers } from "@/lib/auction-store";
 import { prezzoRiferimento, tettoConsigliato, inflazioneAsta, prossimeChiamate } from "@/lib/pricing";
+import { Download } from "lucide-react";
+import { Eyebrow, StatusPill } from "@/components/ui";
+import Console from "./console";
+import Live from "./live";
 
 export const dynamic = "force-dynamic";
 
 const plain = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
-import Console from "./console";
-import Live from "./live";
 
 export default function Page() {
   const { sid, state } = publicState();
   if (sid === null || state === null) {
     return (
       <main className="flex flex-col gap-4">
-        <h1 className="text-2xl font-bold">Asta</h1>
-        <p className="text-sm opacity-70">Nessuna asta. Compila nomi e prepara.</p>
+        <header>
+          <Eyebrow>Console</Eyebrow>
+          <h1 className="font-display mt-2 text-3xl font-extrabold uppercase tracking-tight">Asta</h1>
+          <p className="mt-1 text-sm text-muted">Nessuna asta in corso. Compila i nomi e prepara.</p>
+        </header>
         <Console sid={null} versione={0} stato="" managers={[]} defaults={defaultManagers()} />
       </main>
     );
@@ -40,7 +44,16 @@ export default function Page() {
 
   return (
     <main className="flex flex-col gap-3">
-      <h1 className="text-2xl font-bold">Asta <span className="text-sm font-normal opacity-60">{state.session.stato} · v{state.session.versione}</span></h1>
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <Eyebrow>Console</Eyebrow>
+          <h1 className="font-display mt-1 text-3xl font-extrabold uppercase leading-none tracking-tight">Asta</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusPill stato={state.session.stato} />
+          <span className="font-mono text-[11px] text-faint">v{state.session.versione}</span>
+        </div>
+      </header>
       <Live
         sid={sid} versione={state.session.versione} stato={state.session.stato}
         managers={plain(state.managers)} nomination={plain(state.nomination ?? null)}
@@ -48,7 +61,8 @@ export default function Page() {
         consiglio={plain(consiglio)} inflazione={plain(infl)} prossime={plain(next?.top ?? [])} ownerNome={owner?.nome ?? ""}
       />
       {state.session.stato === "CONCLUSA" && (
-        <a href={`/api/exports/csv?sessionId=${sid}`} className="min-h-[48px] rounded bg-black p-3 text-center font-bold text-white">
+        <a href={`/api/exports/csv?sessionId=${sid}`} className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-lg bg-ink px-4 font-semibold text-bg transition hover:bg-white active:scale-[0.98]">
+          <Download className="size-4" aria-hidden />
           Scarica CSV Leghe Fantacalcio
         </a>
       )}

@@ -1,6 +1,8 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { LockKeyhole, TriangleAlert } from "lucide-react";
+import { btnPrimary, cx, inputCls, Wordmark } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,28 +18,38 @@ export default function LoginPage() {
       body: JSON.stringify({ code }),
     });
     if (r.ok) router.push("/");
-    else setErr("Codice errato.");
+    else setErr("Codice errato. Riprova.");
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center gap-4 p-6">
-      <h1 className="text-3xl font-bold">Rebu AI</h1>
-      <p className="text-sm opacity-70">Accesso privato. Inserisci codice.</p>
+    <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center gap-8 p-6">
+      <div>
+        <Wordmark className="text-2xl" />
+        <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.18em] text-faint">Serie A · 2026/27</p>
+        <p className="mt-4 text-sm text-muted">Accesso privato. Inserisci il codice della lega.</p>
+      </div>
       <form onSubmit={submit} className="flex flex-col gap-3">
-        <input
-          type="password"
-          inputMode="text"
-          autoComplete="off"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="Codice accesso"
-          className="min-h-[44px] rounded border border-gray-300 bg-white px-3 text-base text-black"
-        />
-        <button type="submit" className="min-h-[44px] rounded bg-black px-3 text-base font-semibold text-white">
-          Entra
-        </button>
+        <div className="relative">
+          <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" aria-hidden />
+          <input
+            type="password"
+            inputMode="text"
+            autoComplete="off"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="Codice accesso"
+            aria-label="Codice accesso"
+            className={cx(inputCls, "pl-9")}
+          />
+        </div>
+        <button type="submit" className={btnPrimary}>Entra</button>
       </form>
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {err && (
+        <p className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-danger" role="alert">
+          <TriangleAlert className="size-4 shrink-0" aria-hidden />
+          {err}
+        </p>
+      )}
     </main>
   );
 }

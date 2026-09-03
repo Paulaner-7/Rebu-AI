@@ -2,6 +2,20 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Found } from "@/lib/catalog";
+import {
+  ChevronDown,
+  CircleStop,
+  Delete,
+  Gauge,
+  Pause,
+  Play,
+  Search,
+  TriangleAlert,
+  TrendingUp,
+  Trophy,
+  Undo2,
+} from "lucide-react";
+import { btnDanger, btnGhost, btnPrimary, cx, Eyebrow, Panel, PanelHead, RoleBadge, XIChip } from "@/components/ui";
 
 async function post(path: string, body: object) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -17,7 +31,8 @@ export type Mgr = {
 };
 export type Nom = { o: number; nome: string; squadra: string; ruolo: string } | null;
 
-const TASTI = ["1","2","3","4","5","6","7","8","9","C","0","⌫"];
+const TASTI = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "DEL"] as const;
+const RUOLI = ["P", "D", "C", "A"] as const;
 
 export default function Live({ sid, versione, stato, managers, nomination, topPagati, affari, consiglio, inflazione, prossime, ownerNome }: {
   sid: number; versione: number; stato: string; managers: Mgr[]; nomination: Nom;
@@ -50,7 +65,7 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
   }
   function digito(t: string) {
     if (t === "C") setPrezzo("");
-    else if (t === "⌫") setPrezzo((p) => p.slice(0, -1));
+    else if (t === "DEL") setPrezzo((p) => p.slice(0, -1));
     else setPrezzo((p) => (p + t).slice(0, 3));
   }
   const teamSel = managers.find((m) => m.id === team);
@@ -58,116 +73,307 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
 
   return (
     <div className="flex flex-col gap-3">
-      {/* CHIAMATA CORRENTE */}
-      <section className="rounded border bg-white p-3">
+      {/* ——— AVVIO ——— */}
+      {stato === "PRONTA" && (
+        <Panel className="flex flex-col gap-3">
+          <p className="text-sm text-muted">Asta pronta. All&apos;avvio il dataset viene congelato.</p>
+          <button disabled={busy} onClick={() => go(() => post("/api/auction/start", { sessionId: sid, expected: versione }))} className={btnPrimary}>
+            <Play className="size-4" aria-hidden />
+            Avvia asta
+          </button>
+        </Panel>
+      )}
+
+      {/* ——— CHIAMATA CORRENTE ——— */}
+      <Panel>
         {nomination ? (
           <>
-            <p className="text-xs opacity-60">Ora chiamato</p>
-            <p className="text-xl font-bold">{nomination.nome} <span className="text-sm font-normal opacity-60">· {nomination.squadra} · {nomination.ruolo}</span></p>
-            <p className="mt-1 text-lg">Offerta: <b>{prezzo || "—"}</b>{teamSel ? <> · <b>{teamSel.nome}</b></> : null}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button disabled={!canSell} onClick={() => { setBusy(true); go(() => post("/api/auction/sell", {
-                  sessionId: sid, officialId: nomination.o, managerId: team, prezzo: Number(prezzo),
-                  idem: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, expected: versione,
-                }).then(() => { setTeam(null); setPrezzo(""); })).finally(() => setBusy(false)); }}
-                className="min-h-[48px] flex-1 rounded bg-black px-4 font-bold text-white disabled:opacity-40">Vendi</button>
-              <button disabled={busy} onClick={() => go(() => post("/api/auction/unsold", { sessionId: sid, officialId: nomination.o, expected: versione }).then(() => { setTeam(null); setPrezzo(""); }))}
-                className="min-h-[48px] rounded border px-4">Invenduto</button>
-              <button disabled={busy} onClick={() => { if (confirm("Annullare ultima operazione?")) go(() => post("/api/auction/undo", { sessionId: sid, expected: versione })); }}
-                className="min-h-[48px] rounded border px-4">Annulla ultima</button>
-              <button disabled={busy} onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: stato === "LIVE" ? "pause" : "resume", expected: versione }))}
-                className="min-h-[48px] rounded border px-4">{stato === "LIVE" ? "Pausa" : "Riprendi"}</button>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <Eyebrow>Ora chiamato</Eyebrow>
+                <p className="font-display mt-1 truncate text-3xl font-extrabold uppercase leading-none tracking-tight">{nomination.nome}</p>
+                <p className="mt-1.5 text-sm text-muted">{nomination.squadra}</p>
+              </div>
+              <RoleBadge r={nomination.ruolo} className="mt-1 h-6 min-w-6 text-xs" />
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-line bg-panel2 px-4 py-3">
+              <div>
+                <Eyebrow>Offerta</Eyebrow>
+                <p className="tnum mt-0.5 font-mono text-4xl font-semibold text-signal">{prezzo || "—"}</p>
+              </div>
+              <div className="text-right">
+                <Eyebrow>Acquirente</Eyebrow>
+                <p className="mt-1.5 truncate text-base font-semibold">{teamSel?.nome ?? "—"}</p>
+              </div>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                disabled={!canSell}
+                onClick={() => { setBusy(true); go(() => post("/api/auction/sell", {
+                    sessionId: sid, officialId: nomination.o, managerId: team, prezzo: Number(prezzo),
+                    idem: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, expected: versione,
+                  }).then(() => { setTeam(null); setPrezzo(""); })).finally(() => setBusy(false)); }}
+                className={cx(btnPrimary, "flex-1")}
+              >
+                Vendi
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => go(() => post("/api/auction/unsold", { sessionId: sid, officialId: nomination.o, expected: versione }).then(() => { setTeam(null); setPrezzo(""); }))}
+                className={btnGhost}
+              >
+                Invenduto
+              </button>
+              <button
+                disabled={busy}
+                aria-label="Annulla ultima operazione"
+                title="Annulla ultima operazione"
+                onClick={() => { if (confirm("Annullare ultima operazione?")) go(() => post("/api/auction/undo", { sessionId: sid, expected: versione })); }}
+                className={cx(btnGhost, "w-12 shrink-0 px-0")}
+              >
+                <Undo2 className="size-4" aria-hidden />
+              </button>
+              <button
+                disabled={busy}
+                aria-label={stato === "LIVE" ? "Pausa" : "Riprendi"}
+                title={stato === "LIVE" ? "Pausa" : "Riprendi"}
+                onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: stato === "LIVE" ? "pause" : "resume", expected: versione }))}
+                className={cx(btnGhost, "w-12 shrink-0 px-0")}
+              >
+                {stato === "LIVE" ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+              </button>
             </div>
           </>
         ) : (
-          <p className="text-sm opacity-70">{stato === "LIVE" ? "Nessuna chiamata. Cerca sotto e tocca un nome." : `Asta in stato ${stato}.`}</p>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted">
+              {stato === "LIVE" ? "Nessuna chiamata. Cerca sotto e tocca un nome." : stato === "PRONTA" ? "Tutto pronto: avvia quando le squadre sono ai posti." : `Asta in stato ${stato}.`}
+            </p>
+            {(stato === "LIVE" || stato === "PAUSA") && (
+              <div className="flex gap-2">
+                <button disabled={busy} onClick={() => go(() => post("/api/auction/control", { sessionId: sid, action: stato === "LIVE" ? "pause" : "resume", expected: versione }))} className={btnGhost}>
+                  {stato === "LIVE" ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+                  {stato === "LIVE" ? "Pausa" : "Riprendi"}
+                </button>
+                <button disabled={busy} onClick={() => { if (confirm("Annullare ultima operazione?")) go(() => post("/api/auction/undo", { sessionId: sid, expected: versione })); }} className={btnGhost}>
+                  <Undo2 className="size-4" aria-hidden />
+                  Annulla ultima
+                </button>
+                <button disabled={busy} onClick={() => { if (confirm("Concludere l'asta?")) go(() => post("/api/auction/control", { sessionId: sid, action: "complete", expected: versione })); }} className={btnDanger}>
+                  <CircleStop className="size-4" aria-hidden />
+                  Concludi
+                </button>
+              </div>
+            )}
+          </div>
         )}
-        {err && <p className="mt-2 rounded bg-red-50 p-2 text-sm text-red-700">{err}</p>}
-      </section>
+        {err && (
+          <p className="mt-3 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 p-3 text-sm text-danger" role="alert">
+            <TriangleAlert className="size-4 shrink-0" aria-hidden />
+            {err}
+          </p>
+        )}
+      </Panel>
 
       {stato === "LIVE" && (
-      <>
-      {/* RICERCA */}
-      <section className="rounded border bg-white p-3">
-        <input value={q} onChange={(e) => cerca(e.target.value)} placeholder="Digita 3+ lettere (nome o squadra)"
-          className="min-h-[48px] w-full rounded border px-3 text-lg" />
-        <ul>
-          {ris.map((p) => (
-            <li key={p.official_id}>
-              <button disabled={busy} onClick={() => go(() => post("/api/auction/nominate", { sessionId: sid, officialId: p.official_id, expected: versione }))}
-                className="mt-1 flex min-h-[48px] w-full items-center justify-between gap-2 rounded border px-3 text-left">
-                <span><b>{p.nome}</b> <span className="opacity-60">· {p.squadra} · {p.ruolo}</span>
-                  {p.titolare ? <span className="ml-1 rounded bg-green-100 px-1 text-xs">XI</span> : null}</span>
-                <span className="text-sm opacity-70">Qt {p.qt ?? "—"}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+        <>
+          {/* ——— RICERCA ——— */}
+          <Panel>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" aria-hidden />
+              <input
+                value={q}
+                onChange={(e) => cerca(e.target.value)}
+                placeholder="Digita 3+ lettere (nome o squadra)"
+                aria-label="Cerca giocatore da nominare"
+                className="min-h-[48px] w-full rounded-lg border border-line bg-panel2 pl-9 pr-3 text-base text-ink transition placeholder:text-faint focus:border-signal/60 focus:outline-none"
+              />
+            </div>
+            {ris.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {ris.map((p) => (
+                  <li key={p.official_id}>
+                    <button
+                      disabled={busy}
+                      onClick={() => go(() => post("/api/auction/nominate", { sessionId: sid, officialId: p.official_id, expected: versione }))}
+                      className="flex min-h-[48px] w-full cursor-pointer items-center gap-3 rounded-lg border border-line bg-panel2 px-3 text-left transition hover:border-faint active:scale-[0.99]"
+                    >
+                      <RoleBadge r={p.ruolo} />
+                      <span className="min-w-0 flex-1 truncate">
+                        <b>{p.nome}</b> <span className="text-muted">· {p.squadra}</span>
+                        {p.titolare ? <span className="ml-2"><XIChip /></span> : null}
+                      </span>
+                      <span className="tnum shrink-0 font-mono text-sm text-muted">Qt {p.qt ?? "—"}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
 
-      {/* SQUADRA + PREZZO */}
-      <section className="rounded border bg-white p-3">
-        <p className="text-xs opacity-60">Acquirente (1° tocco)</p>
-        <div className="mt-1 grid grid-cols-2 gap-2">
-          {managers.map((m) => (
-            <button key={m.id} onClick={() => setTeam(m.id)}
-              className={`min-h-[48px] rounded border px-2 text-left ${team === m.id ? "border-black bg-black text-white" : ""}`}>
-              <b>{m.nome}</b> <span className="text-sm opacity-70">· {m.residui} · max {m.maxSpesa}</span>
-            </button>
-          ))}
-        </div>
-        <p className="mt-3 text-xs opacity-60">Prezzo (tastierino)</p>
-        <p className="text-3xl font-bold">{prezzo || "—"}</p>
-        <div className="mt-1 grid grid-cols-3 gap-2">
-          {TASTI.map((t) => (
-            <button key={t} onClick={() => digito(t)} className="min-h-[56px] rounded border text-xl font-bold">{t}</button>
-          ))}
-        </div>
-        <div className="mt-2 flex gap-2">
-          <button onClick={() => setPrezzo((p) => String(Number(p || 0) + 1))} className="min-h-[44px] flex-1 rounded border">+1</button>
-          <button onClick={() => setPrezzo((p) => String(Number(p || 0) + 5))} className="min-h-[44px] flex-1 rounded border">+5</button>
-        </div>
-      </section>
-      </>
+          {/* ——— ACQUIRENTE + PREZZO ——— */}
+          <Panel>
+            <Eyebrow>Acquirente</Eyebrow>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {managers.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setTeam(m.id)}
+                  aria-pressed={team === m.id}
+                  className={cx(
+                    "min-h-[48px] cursor-pointer rounded-lg border px-3 text-left transition active:scale-[0.98]",
+                    team === m.id ? "border-signal bg-signal/10" : "border-line bg-panel2 hover:border-faint"
+                  )}
+                >
+                  <b className="block truncate">{m.nome}</b>
+                  <span className="tnum font-mono text-xs text-muted">{m.residui} cr · max {m.maxSpesa}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 flex items-baseline justify-between">
+              <Eyebrow>Prezzo</Eyebrow>
+              <p className="tnum font-mono text-3xl font-semibold text-signal">{prezzo || "—"}</p>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {TASTI.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => digito(t)}
+                  aria-label={t === "DEL" ? "Cancella cifra" : t === "C" ? "Azzera prezzo" : `Cifra ${t}`}
+                  className="flex min-h-[56px] cursor-pointer items-center justify-center rounded-lg border border-line bg-panel2 font-mono text-xl font-semibold transition hover:border-faint active:scale-95"
+                >
+                  {t === "DEL" ? <Delete className="size-5" aria-hidden /> : t}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button onClick={() => setPrezzo((p) => String(Number(p || 0) + 1))} className={cx(btnGhost, "flex-1 font-mono")}>+1</button>
+              <button onClick={() => setPrezzo((p) => String(Number(p || 0) + 5))} className={cx(btnGhost, "flex-1 font-mono")}>+5</button>
+            </div>
+          </Panel>
+        </>
       )}
 
-      {/* CONSIGLIO DETERMINISTICO */}
-      <section className="rounded border bg-white p-3 text-sm">
-        <h2 className="font-bold">Consiglio motore (no AI)</h2>
-        <p className="text-xs opacity-60">Inflazione live: P {inflazione.reparti.P.valore} · D {inflazione.reparti.D.valore} · C {inflazione.reparti.C.valore} · A {inflazione.reparti.A.valore} (tot {inflazione.totale})</p>
+      {/* ——— CONSIGLIO MOTORE ——— */}
+      <Panel>
+        <PanelHead icon={Gauge} title="Consiglio motore" hint="deterministico · no AI" />
+        <div className="flex flex-wrap gap-2">
+          {RUOLI.map((r) => (
+            <span key={r} className="flex items-center gap-1.5 rounded border border-line bg-panel2 px-2 py-1 font-mono text-xs">
+              <RoleBadge r={r} className="h-4 min-w-4 border-0 bg-transparent px-0 text-[10px]" />
+              <span className="tnum text-muted">{inflazione.reparti[r].valore}%</span>
+            </span>
+          ))}
+          <span className="flex items-center gap-1.5 rounded border border-line bg-panel2 px-2 py-1 font-mono text-xs text-muted">
+            tot <span className="tnum">{inflazione.totale}%</span>
+          </span>
+        </div>
+
         {consiglio && nomination ? (
-          <p className="mt-1">Rif. {nomination.nome}: <b>{consiglio.rif.valore}</b> ({consiglio.rif.formula}) · adattato inflazione <b>{consiglio.tetto.adattato}</b> · tetto {ownerNome} <b>{consiglio.tetto.tettoMax}</b> → <b>consigliato {consiglio.tetto.consigliato}</b></p>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Riferimento</p>
+              <p className="tnum mt-0.5 font-mono text-lg font-semibold">{consiglio.rif.valore}</p>
+              <p className="font-mono text-[10px] text-faint">{consiglio.rif.formula}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Adattato</p>
+              <p className="tnum mt-0.5 font-mono text-lg font-semibold">{consiglio.tetto.adattato}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Tetto {ownerNome}</p>
+              <p className="tnum mt-0.5 font-mono text-lg font-semibold">{consiglio.tetto.tettoMax}</p>
+            </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Consigliato</p>
+              <p className="tnum mt-0.5 font-mono text-lg font-semibold text-signal">{consiglio.tetto.consigliato}</p>
+            </div>
+          </div>
         ) : (
-          <p className="mt-1 opacity-70">Nomina un giocatore per vedere riferimento e tetto di {ownerNome}.</p>
+          <p className="mt-3 text-sm text-muted">Nomina un giocatore per vedere riferimento e tetto di {ownerNome}.</p>
         )}
+
         {prossime.length > 0 && (
-          <ol className="mt-1 list-decimal pl-5">
-            {prossime.map((p) => <li key={p.nome}>{p.nome} · {p.squadra} · {p.ruolo} (score {p.score}: {p.motivi.join(", ")})</li>)}
+          <ol className="mt-3 flex flex-col gap-1.5 border-t border-line pt-3">
+            {prossime.map((p, i) => (
+              <li key={p.nome} className="flex items-baseline gap-3 text-sm">
+                <span className="tnum font-mono text-xs font-semibold text-signal">{String(i + 1).padStart(2, "0")}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  <b>{p.nome}</b> <span className="text-muted">· {p.squadra}</span>
+                </span>
+                <RoleBadge r={p.ruolo} />
+                <span className="shrink-0 font-mono text-[11px] text-faint" title={p.motivi.join(", ")}>score {p.score}</span>
+              </li>
+            ))}
           </ol>
         )}
-      </section>
+      </Panel>
 
-      {/* ROSE */}
-      <section className="flex flex-col gap-2">
+      {/* ——— ROSE ——— */}
+      <section className="flex flex-col gap-2" aria-label="Rose">
         {managers.map((m) => (
-          <details key={m.id} className="rounded border bg-white p-3 text-sm">
-            <summary className="min-h-[44px]"><b>{m.nome}</b> · residui <b>{m.residui}</b> ·
-              P{m.slot.P.usati}/{m.slot.P.totali} D{m.slot.D.usati}/{m.slot.D.totali} C{m.slot.C.usati}/{m.slot.C.totali} A{m.slot.A.usati}/{m.slot.A.totali}</summary>
-            <ul className="mt-1">
-              {m.rosa.map((g, i) => <li key={i}>{g.nome} · {g.squadra} · {g.ruolo} · {g.prezzo}</li>)}
+          <details key={m.id} className="group rounded-xl border border-line bg-panel">
+            <summary className="flex min-h-[48px] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+              <b className="flex-1 truncate">{m.nome}</b>
+              <span className="tnum font-mono text-sm text-signal">{m.residui} cr</span>
+              <span className="flex gap-1.5 font-mono text-[11px] text-muted">
+                {RUOLI.map((r) => (
+                  <span key={r} className="tnum">
+                    <span className={cx("font-semibold", { P: "text-p", D: "text-d", C: "text-c", A: "text-a" }[r])}>{r}</span>
+                    {m.slot[r].usati}/{m.slot[r].totali}
+                  </span>
+                ))}
+              </span>
+              <ChevronDown className="size-4 text-faint transition [details[open]_&]:rotate-180" aria-hidden />
+            </summary>
+            <ul className="border-t border-line px-4 py-2">
+              {m.rosa.length === 0 && <li className="py-2 text-sm text-faint">Rosa vuota.</li>}
+              {m.rosa.map((g, i) => (
+                <li key={i} className="flex items-center gap-3 border-b border-line/50 py-2 text-sm last:border-0">
+                  <RoleBadge r={g.ruolo} />
+                  <span className="min-w-0 flex-1 truncate">{g.nome} <span className="text-faint">· {g.squadra}</span></span>
+                  <span className="tnum font-mono text-muted">{g.prezzo}</span>
+                </li>
+              ))}
             </ul>
           </details>
         ))}
       </section>
 
-      {/* RIEPILOGHI */}
-      <section className="rounded border bg-white p-3 text-sm">
-        <h2 className="font-bold">Più pagati</h2>
-        <ol className="list-decimal pl-5">{topPagati.map((t, i) => <li key={i}>{t.nome} ({t.squadra}) → {t.chi} · {t.prezzo}</li>)}</ol>
-        <h2 className="mt-3 font-bold">Migliori affari vs FVM/2</h2>
-        <p className="text-xs opacity-60">PMA assente nei tuoi PDF: riferimento = FVM dimezzato.</p>
-        <ol className="list-decimal pl-5">{affari.map((t, i) => <li key={i}>{t.nome} ({t.squadra}) → {t.chi} · {t.prezzo} (rif. {t.rif})</li>)}</ol>
-      </section>
+      {/* ——— RIEPILOGHI ——— */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Panel>
+          <PanelHead icon={Trophy} title="Più pagati" />
+          <ol className="flex flex-col gap-1.5 text-sm">
+            {topPagati.length === 0 && <li className="text-faint">Nessun acquisto.</li>}
+            {topPagati.map((t, i) => (
+              <li key={i} className="flex items-baseline gap-2">
+                <span className="tnum w-5 shrink-0 font-mono text-xs text-faint">{String(i + 1).padStart(2, "0")}</span>
+                <span className="min-w-0 flex-1 truncate"><b>{t.nome}</b> <span className="text-faint">({t.squadra})</span></span>
+                <span className="shrink-0 text-muted">{t.chi}</span>
+                <span className="tnum w-10 shrink-0 text-right font-mono font-semibold">{t.prezzo}</span>
+              </li>
+            ))}
+          </ol>
+        </Panel>
+        <Panel>
+          <PanelHead icon={TrendingUp} title="Migliori affari" hint="rif. FVM/2" />
+          <ol className="flex flex-col gap-1.5 text-sm">
+            {affari.length === 0 && <li className="text-faint">Nessun acquisto.</li>}
+            {affari.map((t, i) => (
+              <li key={i} className="flex items-baseline gap-2">
+                <span className="tnum w-5 shrink-0 font-mono text-xs text-faint">{String(i + 1).padStart(2, "0")}</span>
+                <span className="min-w-0 flex-1 truncate"><b>{t.nome}</b> <span className="text-faint">({t.squadra})</span></span>
+                <span className="tnum shrink-0 font-mono font-semibold text-d">{t.prezzo}</span>
+                <span className="tnum w-10 shrink-0 text-right font-mono text-xs text-faint">/{t.rif}</span>
+              </li>
+            ))}
+          </ol>
+        </Panel>
+      </div>
     </div>
   );
 }

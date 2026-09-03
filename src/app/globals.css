@@ -1,26 +1,99 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  /* superfici — inchiostro notte, mai nero puro */
+  --color-bg: #0a0c10;
+  --color-panel: #12151c;
+  --color-panel2: #1a1f29;
+  --color-line: #232a37;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* testo */
+  --color-ink: #f3f5f9;
+  --color-muted: #8f99ab;
+  --color-faint: #5d6678;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  /* segnale — ambra faretti: live, selezione, azione chiave */
+  --color-signal: #ffb224;
+
+  /* ruoli fantacalcio — unico sistema cromatico semantico */
+  --color-p: #f2c94c;
+  --color-d: #3ecf8e;
+  --color-c: #5b9dff;
+  --color-a: #ff6b6b;
+  --color-danger: #ff6060;
+
+  /* tipo */
+  --font-sans: var(--font-archivo), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-plex), ui-monospace, "SF Mono", monospace;
+
+  /* moto */
+  --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
   }
 }
 
+@utility font-display {
+  font-stretch: 125%;
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--color-faint);
+}
+
+:root {
+  color-scheme: dark;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background:
+    radial-gradient(1100px 520px at 50% -12%, rgb(255 178 36 / 0.05), transparent 62%),
+    var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: rgb(255 178 36 / 0.28);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+}
+
+summary {
+  list-style: none;
+  cursor: pointer;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 8px;
+  border: 2px solid var(--color-bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

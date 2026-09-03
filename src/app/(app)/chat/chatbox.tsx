@@ -1,6 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Cpu, SendHorizontal } from "lucide-react";
 import type { Contract } from "@/lib/agent";
+import { btnPrimary, cx, inputCls, Panel } from "@/components/ui";
 
 type Msg = { chi: "io" | "rebu"; testo: string; contract?: Contract | null; via?: string; model?: string };
 
@@ -12,12 +14,17 @@ export default function ChatBox() {
   const [domanda, setDomanda] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch("/api/agent/models").then((r) => r.json()).then((j) => {
       if (j.ok) { setModels(j.data.models.map((m: { id: string }) => m.id)); setModel(j.data.default); setConfigured(j.data.configured); }
     });
   }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [msgs.length, busy]);
 
   async function invia(e: React.FormEvent) {
     e.preventDefault();
@@ -38,35 +45,82 @@ export default function ChatBox() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded border bg-white p-3 text-sm">
-        <label className="opacity-60">Modello {configured ? "" : "(chiave non impostata: risponde il motore)"}</label>
-        <div className="mt-1 flex gap-2">
-          <select value={model} onChange={(e) => setModel(e.target.value)} className="min-h-[44px] flex-1 rounded border px-2 text-base">
+      <Panel className="py-3">
+        <div className="flex items-center gap-2">
+          <Cpu className="size-4 shrink-0 text-signal" aria-hidden />
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            aria-label="Modello AI"
+            className="min-h-[44px] flex-1 rounded-lg border border-line bg-panel2 px-2 font-mono text-sm text-ink focus:border-signal/60 focus:outline-none"
+          >
             {[model, ...models.filter((x) => x !== model)].filter(Boolean).map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
-          <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="o ID manuale"
-            className="min-h-[44px] w-32 rounded border px-2 text-base" />
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            placeholder="ID manuale"
+            aria-label="ID modello manuale"
+            className="min-h-[44px] w-32 rounded-lg border border-line bg-panel2 px-2 font-mono text-sm text-ink placeholder:text-faint focus:border-signal/60 focus:outline-none"
+          />
         </div>
-      </div>
-      <div className="flex flex-col gap-2">
+        {!configured && <p className="mt-2 font-mono text-[11px] text-faint">Chiave non impostata: risponde il motore.</p>}
+      </Panel>
+
+      <div className="flex flex-col gap-2" aria-live="polite">
+        {msgs.length === 0 && (
+          <p className="py-10 text-center text-sm text-muted">
+            Chiedi al motore: prezzi, tetti, strategie per reparto.
+          </p>
+        )}
         {msgs.map((m, i) => (
-          <div key={i} className={`rounded border p-3 text-sm ${m.chi === "io" ? "bg-zinc-100" : "bg-white"}`}>
-            <p className="whitespace-pre-wrap">{m.testo}</p>
+          <div
+            key={i}
+            className={cx(
+              "max-w-[92%] rounded-xl border p-3 text-sm sm:max-w-[80%]",
+              m.chi === "io" ? "self-end border-line bg-panel2" : "self-start border-line bg-panel"
+            )}
+          >
+            <p className={cx("eyebrow mb-1", m.chi === "io" && "text-right")}>{m.chi === "io" ? "Tu" : "Rebu"}</p>
+            <p className="whitespace-pre-wrap leading-relaxed">{m.testo}</p>
             {m.contract && (
-              <div className="mt-2 rounded bg-zinc-50 p-2 text-sm">
-                <p><b>{m.contract.azione}</b> fino a <b>{m.contract.prezzoMassimoConsigliato}</b> · {m.contract.confidenza}</p>
-                <ul className="list-disc pl-5">{m.contract.motivazioni.map((x, k) => <li key={k}>{x}</li>)}</ul>
-                {m.contract.alternative.length > 0 && <p className="opacity-70">Alternative: {m.contract.alternative.join(", ")}</p>}
-                <p className="text-xs opacity-50">Fonti: {m.contract.fonti.join(", ")} · via {m.via} · {m.model}</p>
+              <div className="mt-3 rounded-lg border border-signal/25 bg-signal/5 p-3">
+                <p className="text-sm">
+                  <b>{m.contract.azione}</b> fino a{" "}
+                  <span className="tnum font-mono text-lg font-semibold text-signal">{m.contract.prezzoMassimoConsigliato}</span>{" "}
+                  <span className="font-mono text-[11px] uppercase tracking-wider text-faint">· {m.contract.confidenza}</span>
+                </p>
+                <ul className="mt-2 flex flex-col gap-1 text-sm text-muted">
+                  {m.contract.motivazioni.map((x, k) => (
+                    <li key={k} className="flex gap-2">
+                      <span className="tnum shrink-0 font-mono text-[11px] text-signal">{String(k + 1).padStart(2, "0")}</span>
+                      {x}
+                    </li>
+                  ))}
+                </ul>
+                {m.contract.alternative.length > 0 && (
+                  <p className="mt-2 text-sm text-muted">Alternative: {m.contract.alternative.join(", ")}</p>
+                )}
+                <p className="mt-2 font-mono text-[10px] text-faint">Fonti: {m.contract.fonti.join(", ")} · via {m.via} · {m.model}</p>
               </div>
             )}
           </div>
         ))}
+        {busy && <p className="eyebrow self-start">Rebu sta pensando…</p>}
+        <div ref={bottomRef} />
       </div>
+
       <form onSubmit={invia} className="flex gap-2">
-        <input value={domanda} onChange={(e) => setDomanda(e.target.value)} placeholder="Chiedi (es. Malen fino a quanto?)"
-          className="min-h-[48px] flex-1 rounded border px-3 text-base" />
-        <button disabled={busy} className="min-h-[48px] rounded bg-black px-5 font-bold text-white disabled:opacity-40">→</button>
+        <input
+          value={domanda}
+          onChange={(e) => setDomanda(e.target.value)}
+          placeholder="Chiedi (es. Malen fino a quanto?)"
+          aria-label="Domanda per l'assistente"
+          className={cx(inputCls, "flex-1")}
+        />
+        <button disabled={busy} aria-label="Invia" className={cx(btnPrimary, "w-12 shrink-0 px-0")}>
+          <SendHorizontal className="size-4" aria-hidden />
+        </button>
       </form>
     </div>
   );

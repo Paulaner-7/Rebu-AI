@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Check, Cpu, DatabaseBackup, RefreshCw, ShieldCheck, TriangleAlert, Users } from "lucide-react";
+import { btnDanger, btnGhost, btnPrimary, cx, inputCls, Panel, PanelHead } from "@/components/ui";
 
 type Mgr = { nome: string; nome_squadra: string; note: string };
 
@@ -29,55 +31,69 @@ export default function SettingsForm({ editable, astaAperta }: { editable: boole
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {msg && <p className="rounded bg-zinc-100 p-2 text-sm">{msg}</p>}
+    <div className="flex flex-col gap-3">
+      {msg && (
+        <p className="flex items-center gap-2 rounded-lg border border-line bg-panel2 p-3 text-sm" role="status">
+          <Check className="size-4 shrink-0 text-d" aria-hidden />
+          {msg}
+        </p>
+      )}
 
-      <section className="rounded border bg-white p-3">
-        <h2 className="font-bold">Modificatore difesa</h2>
-        <button onClick={() => { const v = mod === "on" ? "off" : "on"; setMod(v); salva({ modificatore: v }); }}
-          className={`mt-2 min-h-[48px] w-full rounded font-bold ${mod === "on" ? "bg-black text-white" : "border"}`}>
-          {mod === "on" ? "ATTIVO (tocca per spegnere)" : "SPENTO (tocca per attivare)"}
+      <Panel>
+        <PanelHead icon={ShieldCheck} title="Modificatore difesa" />
+        <button
+          onClick={() => { const v = mod === "on" ? "off" : "on"; setMod(v); salva({ modificatore: v }); }}
+          aria-pressed={mod === "on"}
+          className="flex min-h-[48px] w-full cursor-pointer items-center justify-between rounded-lg border border-line bg-panel2 px-4 transition hover:border-faint"
+        >
+          <span className="font-medium">{mod === "on" ? "Attivo" : "Spento"}</span>
+          <span className={cx("relative h-6 w-11 rounded-full transition", mod === "on" ? "bg-d" : "bg-line")}>
+            <span className={cx("absolute top-0.5 size-5 rounded-full bg-ink transition-all", mod === "on" ? "left-[22px]" : "left-0.5")} />
+          </span>
         </button>
-        <p className="mt-1 text-xs opacity-60">Se spento, motore e chat smettono di privilegiare D/P.</p>
-      </section>
+        <p className="mt-2 text-xs text-muted">Se spento, motore e chat smettono di privilegiare D/P.</p>
+      </Panel>
 
-      <section className="rounded border bg-white p-3">
-        <h2 className="font-bold">Modello AI</h2>
-        <div className="mt-2 flex gap-2">
-          <select value={model} onChange={(e) => setModel(e.target.value)} className="min-h-[48px] flex-1 rounded border px-2 text-base">
+      <Panel>
+        <PanelHead icon={Cpu} title="Modello AI" />
+        <div className="flex gap-2">
+          <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Modello AI" className={cx(inputCls, "flex-1 font-mono text-sm")}>
             {[model, ...models.filter((x) => x !== model)].filter(Boolean).map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
           <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="ID manuale"
-            className="min-h-[48px] w-32 rounded border px-2 text-base" />
+            aria-label="ID modello manuale" className={cx(inputCls, "w-32 font-mono text-sm")} />
         </div>
         <button onClick={async () => {
           const m = custom.trim() || model;
           await fetch("/api/agent/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: m }) });
           setModel(m); setCustom(""); setMsg(`Modello attivo: ${m}`);
-        }} className="mt-2 min-h-[48px] w-full rounded bg-black font-bold text-white">Usa subito</button>
-      </section>
+        }} className={cx(btnPrimary, "mt-2 w-full")}>Usa subito</button>
+      </Panel>
 
-      <section className="rounded border bg-white p-3">
-        <h2 className="font-bold">Partecipanti {editable ? "(modificabili: asta non avviata)" : "(bloccati: asta avviata)"}</h2>
-        <div className="mt-2 flex flex-col gap-2">
+      <Panel>
+        <PanelHead icon={Users} title="Partecipanti" hint={editable ? "modificabili: asta non avviata" : "bloccati: asta avviata"} />
+        <div className="flex flex-col gap-2">
           {mgrs.map((m, i) => (
-            <div key={i} className="flex gap-2">
+            <div key={i} className="flex items-center gap-2">
+              <span className="tnum w-6 shrink-0 text-center font-mono text-xs font-semibold text-faint">{String(i + 1).padStart(2, "0")}</span>
               <input value={m.nome} disabled={!editable} onChange={(e) => setMgrs(mgrs.map((x, j) => j === i ? { ...x, nome: e.target.value } : x))}
-                placeholder="Nome" className="min-h-[48px] flex-1 rounded border px-2 text-base disabled:opacity-50" />
+                placeholder="Nome" aria-label={`Nome partecipante ${i + 1}`} className={cx(inputCls, "disabled:opacity-50")} />
               <input value={m.nome_squadra} disabled={!editable} onChange={(e) => setMgrs(mgrs.map((x, j) => j === i ? { ...x, nome_squadra: e.target.value } : x))}
-                placeholder="Squadra" className="min-h-[48px] flex-1 rounded border px-2 text-base disabled:opacity-50" />
+                placeholder="Squadra" aria-label={`Squadra partecipante ${i + 1}`} className={cx(inputCls, "disabled:opacity-50")} />
             </div>
           ))}
         </div>
-        {editable && <button onClick={() => salva({ managers: mgrs.map((m, i) => ({ ...m, is_owner: i === 0 })) })}
-          className="mt-2 min-h-[48px] w-full rounded bg-black font-bold text-white">Salva partecipanti</button>}
-      </section>
+        {editable && (
+          <button onClick={() => salva({ managers: mgrs.map((m, i) => ({ ...m, is_owner: i === 0 })) })}
+            className={cx(btnPrimary, "mt-3 w-full")}>Salva partecipanti</button>
+        )}
+      </Panel>
 
-      <section className="rounded border bg-white p-3">
-        <h2 className="font-bold">Backup emergenza</h2>
-        <div className="mt-2 flex gap-2">
-          <a href="/api/backup" className="min-h-[48px] flex-1 rounded border p-3 text-center">Scarica backup JSON</a>
-          <label className="min-h-[48px] flex-1 cursor-pointer rounded border p-3 text-center">
+      <Panel>
+        <PanelHead icon={DatabaseBackup} title="Backup emergenza" />
+        <div className="flex gap-2">
+          <a href="/api/backup" className={cx(btnGhost, "flex-1")}>Scarica JSON</a>
+          <label className={cx(btnGhost, "flex-1")}>
             Ripristina
             <input type="file" accept=".json" className="hidden" onChange={async (e) => {
               const f = e.target.files?.[0];
@@ -89,31 +105,32 @@ export default function SettingsForm({ editable, astaAperta }: { editable: boole
             }} />
           </label>
         </div>
-        <p className="mt-1 text-xs opacity-60">Se telefono/PC muore: ripristina da altro dispositivo, verifica rose, riprendi.</p>
-      </section>
+        <p className="mt-2 text-xs text-muted">Se telefono/PC muore: ripristina da altro dispositivo, verifica rose, riprendi.</p>
+      </Panel>
 
-      <section className="rounded border bg-white p-3">
-        <h2 className="font-bold">Dataset</h2>
+      <Panel>
+        <PanelHead icon={RefreshCw} title="Dataset" />
         <button disabled={astaAperta} onClick={async () => {
           setLog("Import in corso…");
           const r = await fetch("/api/dataset/reimport", { method: "POST" });
           const j = await r.json();
           setLog(j.ok ? j.data.log : `Bloccato: ${j.message}`);
-        }} className="mt-2 min-h-[48px] w-full rounded border disabled:opacity-40">
-          Reimporta dataset {astaAperta ? "(vietato ad asta aperta)" : ""}</button>
-        {log && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs">{log}</pre>}
-      </section>
+        }} className={cx(btnGhost, "w-full")}>
+          Reimporta dataset {astaAperta ? "(vietato ad asta aperta)" : ""}
+        </button>
+        {log && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-bg p-3 font-mono text-xs text-muted">{log}</pre>}
+      </Panel>
 
-      <section className="rounded border border-red-300 bg-white p-3">
-        <h2 className="font-bold text-red-700">Reset asta</h2>
+      <Panel className="border-danger/30">
+        <PanelHead icon={TriangleAlert} title="Zona pericolosa" />
         <button onClick={async () => {
           if (!confirm("Sicuro? Cancella sessione, eventi e acquisti.")) return;
           if (!confirm("Seconda conferma: davvero resettare tutto?")) return;
           const r = await fetch("/api/auction/reset", { method: "POST" });
           const j = await r.json();
           setMsg(j.ok ? "Asta resettata." : `Bloccato: ${j.message}`);
-        }} className="mt-2 min-h-[48px] w-full rounded border border-red-500 text-red-700">Reset asta</button>
-      </section>
+        }} className={cx(btnDanger, "w-full")}>Reset asta</button>
+      </Panel>
     </div>
   );
 }

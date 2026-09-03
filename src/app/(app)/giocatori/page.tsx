@@ -1,6 +1,8 @@
+import { Search } from "lucide-react";
 import { searchPlayers, getFilterOptions, isImported, getActiveVersion } from "@/lib/store";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
 import { getState } from "@/lib/auction";
+import { Eyebrow, Panel, RoleBadge, XIChip, btnPrimary } from "@/components/ui";
 import Star from "./star";
 
 export default async function Page({
@@ -24,69 +26,82 @@ export default async function Page({
 
   return (
     <main className="flex flex-col gap-4">
-      <h1 className="text-2xl font-bold">Giocatori</h1>
+      <header>
+        <Eyebrow>Listone</Eyebrow>
+        <h1 className="font-display mt-2 text-3xl font-extrabold uppercase tracking-tight">Giocatori</h1>
+      </header>
       {!imported ? (
-        <p className="text-sm">
-          Dataset non importato. Esegui <code>npm run import</code> nella cartella rebu-ai.
-        </p>
+        <Panel>
+          <p className="text-sm text-muted">
+            Dataset non importato. Esegui <code className="rounded bg-panel2 px-1.5 py-0.5 font-mono text-xs">npm run import</code> nella cartella rebu-ai.
+          </p>
+        </Panel>
       ) : (
         <>
-          <p className="text-xs opacity-60">Dataset {getActiveVersion()} · sempre Nome + Squadra + Ruolo (anti-omonimi)</p>
+          <p className="font-mono text-[11px] text-faint">Dataset {getActiveVersion()} · sempre Nome + Squadra + Ruolo (anti-omonimi)</p>
           <form method="GET" className="flex flex-col gap-2">
-            <input
-              name="q"
-              defaultValue={q}
-              placeholder="Cerca nome o squadra"
-              className="min-h-[44px] rounded border px-3 text-base"
-            />
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" aria-hidden />
+              <input
+                name="q"
+                defaultValue={q}
+                placeholder="Cerca nome o squadra"
+                aria-label="Cerca nome o squadra"
+                className="min-h-[48px] w-full rounded-lg border border-line bg-panel pl-9 pr-3 text-base text-ink transition placeholder:text-faint focus:border-signal/60 focus:outline-none"
+              />
+            </div>
             <div className="flex gap-2">
-              <select name="ruolo" defaultValue={ruolo} className="min-h-[44px] flex-1 rounded border px-2 text-base">
+              <select name="ruolo" defaultValue={ruolo} aria-label="Filtra per ruolo" className="min-h-[48px] flex-1 rounded-lg border border-line bg-panel px-2 text-base text-ink focus:border-signal/60 focus:outline-none">
                 <option value="">Tutti i ruoli</option>
                 {ruoli.map((r) => (
                   <option key={r} value={r}>{r}</option>
                 ))}
               </select>
-              <select name="squadra" defaultValue={squadra} className="min-h-[44px] flex-1 rounded border px-2 text-base">
+              <select name="squadra" defaultValue={squadra} aria-label="Filtra per squadra" className="min-h-[48px] flex-1 rounded-lg border border-line bg-panel px-2 text-base text-ink focus:border-signal/60 focus:outline-none">
                 <option value="">Tutte le squadre</option>
                 {squadre.map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
             </div>
-            <button type="submit" className="min-h-[44px] rounded bg-black font-semibold text-white">
-              Cerca
-            </button>
+            <button type="submit" className={btnPrimary}>Cerca</button>
           </form>
-          <p className="text-sm opacity-70">{rows.length} risultati</p>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left">
-                <th className="py-2">Giocatore</th>
-                <th className="text-right">Qt.</th>
-                <th className="text-right">FVM</th>
-                <th className="text-right">PMA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((p) => (
-                <tr key={p.official_id} className="border-b">
-                  <td className="py-2">
-                    <div className="flex items-start justify-between gap-2">
-                    <div>
-                    <b>{p.nome}</b> <span className="opacity-60">· {p.squadra} · {p.ruolo_classic}</span>
-                    {p.is_titolare ? <span className="ml-1 rounded bg-green-100 px-1 text-xs">XI</span> : null}
-                    <div className="text-xs opacity-50">{p.ruolo_mantra}</div>
-                    </div>
-                    <Star officialId={p.official_id} stato={(pref.get(p.official_id) as "W" | "X") ?? null} />
-                    </div>
-                  </td>
-                  <td className="text-right">{p.qt_a ?? "—"}</td>
-                  <td className="text-right">{p.fvm ?? "—"}</td>
-                  <td className="text-right">{p.pma ?? "—"}</td>
+          <p className="font-mono text-xs text-muted"><span className="tnum">{rows.length}</span> risultati</p>
+          <div className="overflow-hidden rounded-xl border border-line bg-panel">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left">
+                  <th className="px-3 py-2.5 font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-faint">Giocatore</th>
+                  <th className="px-2 py-2.5 text-right font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-faint">Qt.</th>
+                  <th className="px-2 py-2.5 text-right font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-faint">FVM</th>
+                  <th className="px-3 py-2.5 text-right font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-faint">PMA</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((p) => (
+                  <tr key={p.official_id} className="border-b border-line/60 transition last:border-0 hover:bg-panel2/60">
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <b>{p.nome}</b>
+                            <span className="text-muted">· {p.squadra}</span>
+                            <RoleBadge r={p.ruolo_classic} />
+                            {p.is_titolare ? <XIChip /> : null}
+                          </div>
+                          <div className="mt-0.5 font-mono text-[11px] text-faint">{p.ruolo_mantra}</div>
+                        </div>
+                        <Star officialId={p.official_id} stato={(pref.get(p.official_id) as "W" | "X") ?? null} />
+                      </div>
+                    </td>
+                    <td className="tnum px-2 text-right font-mono">{p.qt_a ?? "—"}</td>
+                    <td className="tnum px-2 text-right font-mono text-muted">{p.fvm ?? "—"}</td>
+                    <td className="tnum px-3 text-right font-mono text-muted">{p.pma ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </main>

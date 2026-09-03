@@ -19,10 +19,14 @@ export type Nom = { o: number; nome: string; squadra: string; ruolo: string } | 
 
 const TASTI = ["1","2","3","4","5","6","7","8","9","C","0","⌫"];
 
-export default function Live({ sid, versione, stato, managers, nomination, topPagati, affari }: {
+export default function Live({ sid, versione, stato, managers, nomination, topPagati, affari, consiglio, inflazione, prossime, ownerNome }: {
   sid: number; versione: number; stato: string; managers: Mgr[]; nomination: Nom;
   topPagati: { nome: string; squadra: string; chi: string; prezzo: number }[];
   affari: { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
+  consiglio: { rif: { valore: number; formula: string }; tetto: { riferimento: number; inflazioneReparto: number; adattato: number; tettoMax: number; consigliato: number } } | null;
+  inflazione: { reparti: Record<string, { valore: number; n: number }>; totale: number };
+  prossime: { nome: string; squadra: string; ruolo: string; score: number; motivi: string[] }[];
+  ownerNome: string;
 }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -126,6 +130,22 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
       </section>
       </>
       )}
+
+      {/* CONSIGLIO DETERMINISTICO */}
+      <section className="rounded border bg-white p-3 text-sm">
+        <h2 className="font-bold">Consiglio motore (no AI)</h2>
+        <p className="text-xs opacity-60">Inflazione live: P {inflazione.reparti.P.valore} · D {inflazione.reparti.D.valore} · C {inflazione.reparti.C.valore} · A {inflazione.reparti.A.valore} (tot {inflazione.totale})</p>
+        {consiglio && nomination ? (
+          <p className="mt-1">Rif. {nomination.nome}: <b>{consiglio.rif.valore}</b> ({consiglio.rif.formula}) · adattato inflazione <b>{consiglio.tetto.adattato}</b> · tetto {ownerNome} <b>{consiglio.tetto.tettoMax}</b> → <b>consigliato {consiglio.tetto.consigliato}</b></p>
+        ) : (
+          <p className="mt-1 opacity-70">Nomina un giocatore per vedere riferimento e tetto di {ownerNome}.</p>
+        )}
+        {prossime.length > 0 && (
+          <ol className="mt-1 list-decimal pl-5">
+            {prossime.map((p) => <li key={p.nome}>{p.nome} · {p.squadra} · {p.ruolo} (score {p.score}: {p.motivi.join(", ")})</li>)}
+          </ol>
+        )}
+      </section>
 
       {/* ROSE */}
       <section className="flex flex-col gap-2">

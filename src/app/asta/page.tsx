@@ -1,5 +1,6 @@
 import { publicState, writableDb } from "@/lib/auction-store";
 import { defaultManagers } from "@/lib/auction-store";
+import { prezzoRiferimento, tettoConsigliato, inflazioneAsta, prossimeChiamate } from "@/lib/pricing";
 import Console from "./console";
 import Live from "./live";
 
@@ -15,6 +16,13 @@ export default function Page() {
     );
   }
   const db = writableDb();
+  const owner = state.managers.find((m) => m.is_owner === 1) ?? state.managers[0];
+  const infl = inflazioneAsta(db, sid);
+  const next = owner ? prossimeChiamate(db, sid, owner.id, 3) : null;
+  const consiglio = state.nomination && owner ? {
+    rif: prezzoRiferimento(db, state.session.dataset, state.nomination.o),
+    tetto: tettoConsigliato(db, sid, owner.id, state.nomination.o),
+  } : null;
   const topPagati = db.prepare(
     `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo
      FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
@@ -33,6 +41,7 @@ export default function Page() {
         sid={sid} versione={state.session.versione} stato={state.session.stato}
         managers={state.managers} nomination={state.nomination ?? null}
         topPagati={topPagati} affari={affari}
+        consiglio={consiglio} inflazione={infl} prossime={next?.top ?? []} ownerNome={owner?.nome ?? ""}
       />
     </main>
   );

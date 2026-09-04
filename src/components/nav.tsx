@@ -75,7 +75,7 @@ export default function Nav() {
       </aside>
 
       {/* ——— barra superiore mobile ——— */}
-      <header className="sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-40 border-b border-line bg-bg/90 pt-[env(safe-area-inset-top)] backdrop-blur lg:hidden">
         <div className="flex h-14 items-center justify-between px-4">
           <Link href="/" aria-label="Home">
             <Wordmark />

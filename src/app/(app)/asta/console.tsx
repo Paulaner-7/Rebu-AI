@@ -48,7 +48,7 @@ export default function Console({ sid, versione, stato, managers, defaults }: Pr
       )}
       {sid === null ? (
         <Panel>
-          <PanelHead icon={Users} title="Setup 8 squadre" hint="nomi compilabili sul posto" />
+          <PanelHead icon={Users} title="Setup 8 squadre" hint="8 nomi" />
           <div className="flex flex-col gap-2">
             {names.map((n, i) => (
               <div key={i} className="flex items-center gap-3">
@@ -114,7 +114,7 @@ export default function Console({ sid, versione, stato, managers, defaults }: Pr
           </div>
           {stato === "LIVE" && (
             <Panel>
-              <PanelHead icon={Gavel} title="Nomina" hint="ID ufficiale listone" />
+              <PanelHead icon={Gavel} title="Nomina" hint="ID listone" />
               <div className="flex gap-2">
                 <input value={oid} onChange={(e) => setOid(e.target.value)} inputMode="numeric" placeholder="es. 5841"
                   aria-label="ID ufficiale giocatore" className={inputCls} />

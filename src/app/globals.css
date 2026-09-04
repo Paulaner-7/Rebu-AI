@@ -22,9 +22,10 @@
   --color-a: #ff6b6b;
   --color-danger: #ff6060;
 
-  /* tipo */
+  /* tipo — sans per testo, sans tabellare per numeri */
   --font-sans: var(--font-archivo), system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-plex), ui-monospace, "SF Mono", monospace;
+  --font-num: var(--font-tight), var(--font-archivo), system-ui, sans-serif;
+  --font-mono: var(--font-tight), var(--font-archivo), system-ui, sans-serif;
 
   /* moto */
   --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
@@ -39,14 +40,23 @@
 }
 
 @utility tnum {
+  font-family: var(--font-num), var(--font-archivo), system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+@utility num {
+  font-family: var(--font-num), var(--font-archivo), system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 @utility eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-archivo), system-ui, sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
   color: var(--color-faint);
 }
 
@@ -61,6 +71,8 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
 }
 
 ::selection {

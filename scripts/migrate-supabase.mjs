@@ -2,6 +2,9 @@
 // finché non chiedi il passaggio runtime. Uso:
 //   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/migrate-supabase.mjs [--dry]
 import { DatabaseSync } from "node:sqlite";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const URL = process.env.SUPABASE_URL ?? "";
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -10,7 +13,7 @@ if (!URL || !KEY) {
   console.log("Mancano SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY. Vedi DEPLOY.md. Niente fatto.");
   process.exit(2);
 }
-const db = new DatabaseSync("rebu-ai/.data/rebu.db", { readOnly: true });
+const db = new DatabaseSync(join(ROOT, ".data", "rebu.db"), { readOnly: true });
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
 async function push(table, rows, chunk = 400) {
   console.log(table, rows.length, "righe");
@@ -32,5 +35,7 @@ await push("ballottaggi", all("ballottaggi"));
 await push("piazzati", all("piazzati"));
 await push("griglia_portieri", all("griglia_portieri"));
 await push("preferenze", all("preferenze"));
+await push("player_stats", all("player_stats"));
+await push("strategy_notes", all("strategy_notes"));
 await push("managers", all("managers").map((m) => ({ ...m, is_owner: !!m.is_owner })));
 console.log("Migrazione dati OK, dataset", ds, DRY ? "(dry-run)" : "");

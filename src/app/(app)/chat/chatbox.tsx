@@ -72,7 +72,7 @@ export default function ChatBox({ compact = false }: { compact?: boolean }) {
       <div className="flex flex-col gap-2" aria-live="polite">
         {msgs.length === 0 && (
           <p className="py-10 text-center text-sm text-muted">
-            {compact ? "Chiedi: chi puntare, budget reparto, tattica." : "Chiedi al motore: prezzi, tetti, strategie per reparto."}
+            {compact ? "Chiedi a Rebu…" : "Prezzi, tetti, strategie per reparto."}
           </p>
         )}
         {msgs.map((m, i) => (
@@ -116,8 +116,8 @@ export default function ChatBox({ compact = false }: { compact?: boolean }) {
         <input
           value={domanda}
           onChange={(e) => setDomanda(e.target.value)}
-          placeholder="Chiedi (es. Malen fino a quanto?)"
-          aria-label="Domanda per l'assistente"
+          placeholder="Chiedi…"
+          aria-label="Domanda"
           className={cx(inputCls, "flex-1")}
         />
         <button disabled={busy} aria-label="Invia" className={cx(btnPrimary, "w-12 shrink-0 px-0")}>

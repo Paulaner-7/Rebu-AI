@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { ensureDataset } from "./ensure-dataset";
+import { statsGiocatore } from "./stats";
 
 const DB_PATH = join(process.cwd(), ".data", "rebu.db");
 
@@ -91,6 +92,33 @@ export function getDatasetInfo(): DatasetInfo | null {
     const squadre = (c.prepare("SELECT COUNT(DISTINCT squadra) AS n FROM players WHERE dataset_version=?").get(version) as { n: number }).n;
     const titolari = (c.prepare("SELECT COUNT(*) AS n FROM players WHERE dataset_version=? AND is_titolare=1").get(version) as { n: number }).n;
     return { version, totale, perRuolo, squadre, titolari };
+  } catch {
+    return null;
+  }
+}
+
+export type PlayerDetail = {
+  player: PlayerRow;
+  dataset: string;
+  stats: ReturnType<typeof statsGiocatore>;
+};
+
+// Scheda singolo giocatore + statistiche fuse (stagione live + storico).
+// Ritorna null se DB assente o id fuori dataset: pagina mostra EmptyState.
+export function getPlayerDetail(officialId: number): PlayerDetail | null {
+  const c = conn();
+  if (!c || !Number.isInteger(officialId)) return null;
+  try {
+    const version = getActiveVersion();
+    if (!version) return null;
+    const p = c
+      .prepare(
+        `SELECT official_id, nome, squadra, ruolo_classic, ruolo_mantra, qt_a, fvm, pma, is_titolare
+         FROM players WHERE dataset_version=? AND official_id=?`
+      )
+      .get(version, officialId) as PlayerRow | undefined;
+    if (!p) return null;
+    return { player: p, dataset: version, stats: statsGiocatore(c, version, officialId) };
   } catch {
     return null;
   }

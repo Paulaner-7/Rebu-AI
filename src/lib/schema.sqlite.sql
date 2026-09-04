@@ -94,3 +94,36 @@ CREATE TABLE IF NOT EXISTS preferenze (
   nota TEXT DEFAULT '',
   PRIMARY KEY (dataset_version, official_id)
 );
+-- Rebu AI — 0004 (SQLite locale): statistiche giocatori multi-stagione.
+-- Da accodare a src/lib/schema.sqlite.sql (oppure applicare con sqlite3 .read).
+CREATE TABLE IF NOT EXISTS player_stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  stagione TEXT NOT NULL,                 -- '2022-23' ... '2026-27'
+  fonte TEXT NOT NULL CHECK (fonte IN ('understat','fantacalcio')),
+  official_id INTEGER,                    -- NULL se non joinabile al dataset attivo
+  nome TEXT NOT NULL,
+  nome_norm TEXT NOT NULL,
+  squadra TEXT NOT NULL,
+  ruolo TEXT DEFAULT '',
+  presenze INTEGER,
+  minuti INTEGER,
+  gol INTEGER,
+  assist INTEGER,
+  xg REAL,
+  xa REAL,
+  npxg REAL,
+  tiri INTEGER,
+  passaggi_chiave INTEGER,
+  ammonizioni INTEGER,
+  espulsioni INTEGER,
+  rigori_segnati INTEGER,
+  rigori_sbagliati INTEGER,
+  rigori_parati INTEGER,
+  media_voto REAL,
+  fantamedia REAL,
+  gol_subiti INTEGER,
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE (stagione, fonte, nome_norm, squadra)
+);
+CREATE INDEX IF NOT EXISTS player_stats_lookup_idx ON player_stats (official_id, stagione);
+CREATE INDEX IF NOT EXISTS player_stats_metriche_idx ON player_stats (stagione, fonte, ruolo);

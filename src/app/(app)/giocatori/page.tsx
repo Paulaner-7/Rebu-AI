@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Search } from "lucide-react";
 import { searchPlayers, getFilterOptions, isImported, getActiveVersion } from "@/lib/store";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
@@ -84,7 +85,9 @@ export default async function Page({
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <b>{p.nome}</b>
+                            <Link href={`/giocatori/${p.official_id}`} className="font-bold underline-offset-4 transition hover:text-signal hover:underline">
+                              <b>{p.nome}</b>
+                            </Link>
                             <span className="text-muted">· {p.squadra}</span>
                             <RoleBadge r={p.ruolo_classic} />
                             {p.is_titolare ? <XIChip /> : null}

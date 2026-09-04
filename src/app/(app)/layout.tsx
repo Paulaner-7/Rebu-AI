@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <>
       <Nav />
       <div className="lg:pl-60">
-        <div className="mx-auto w-full max-w-5xl px-4 pb-28 pt-6 lg:px-8 lg:pb-12 lg:pt-8">{children}</div>
+        <div className="mx-auto w-full max-w-[1560px] px-4 pb-28 pt-6 lg:px-8 lg:pb-12 lg:pt-8">{children}</div>
       </div>
     </>
   );

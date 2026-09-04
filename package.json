@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "import": "node scripts/import-dataset.mjs",
+    "kb": "node scripts/import-kb.mjs",
+    "sync-stats": "node scripts/sync-stats.mjs",
     "test": "vitest run",
     "rehearse": "node scripts/rehearsal.mjs"
   },

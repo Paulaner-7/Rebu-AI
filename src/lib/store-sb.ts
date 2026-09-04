@@ -1,7 +1,10 @@
 // Lettura dataset + statistiche da Supabase (produzione/Vercel).
 // Solo server (service key). Mirror async di lib/store.ts: stesse forme,
 // stessi numeri (fondiStagioni condiviso). Locale resta su SQLite.
+// Letture dataset cached cross-request via unstable_cache: chiave include
+// dataset_version, quindi un import (nuova versione) invalida in automatico.
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { getSupabaseServer } from "./db";
 import { isSupabaseConfigured } from "./env";
 import { fondiStagioni, normSquadra, stessoGiocatore, type StatInputRow } from "./stats";
@@ -16,16 +19,23 @@ function sb() {
   return c;
 }
 
-export const getActiveVersionSb = cache(async (): Promise<string | null> => {
+async function fetchActiveVersion(): Promise<string | null> {
   const { data } = await sb().from("settings").select("value").eq("key", "dataset_attivo").maybeSingle();
   return (data?.value as string) ?? null;
+}
+
+// Versione attiva: cached 30s (riga settings cambia solo a import).
+const activeVersionCached = unstable_cache(fetchActiveVersion, ["active-version"], {
+  revalidate: 30,
+  tags: ["dataset"],
 });
+
+export const getActiveVersionSb = cache(activeVersionCached);
 
 export async function isImportedSb(): Promise<boolean> {
   const v = await getActiveVersionSb();
   if (!v) return false;
-  const { count } = await sb().from("players").select("id", { count: "exact", head: true }).eq("dataset_version", v);
-  return (count ?? 0) > 0;
+  return (await allPlayers(v)).length > 0;
 }
 
 type SbPlayer = {
@@ -46,11 +56,20 @@ function toRow(p: SbPlayer): PlayerRow {
   };
 }
 
-const allPlayersCached = cache(async (version: string): Promise<PlayerRow[]> => {
+async function fetchAllPlayers(version: string): Promise<PlayerRow[]> {
   const { data, error } = await sb().from("players").select(PLAYER_COLS).eq("dataset_version", version);
   if (error) throw new Error(`players: ${error.message}`);
   return ((data ?? []) as SbPlayer[]).map(toRow);
+}
+
+// Listone intero: cached 24h per versione. Import nuovo dataset = nuova
+// versione = cache key diversa = refetch automatico.
+const allPlayersPersistent = unstable_cache(fetchAllPlayers, ["all-players"], {
+  revalidate: 86400,
+  tags: ["players"],
 });
+
+const allPlayersCached = cache((version: string): Promise<PlayerRow[]> => allPlayersPersistent(version));
 
 async function allPlayers(version: string): Promise<PlayerRow[]> {
   return allPlayersCached(version);
@@ -120,6 +139,17 @@ export async function getPlayerDetailSb(officialId: number): Promise<PlayerDetai
   if (!Number.isInteger(officialId)) return null;
   const v = await getActiveVersionSb();
   if (!v) return null;
+  return playerDetailCached(v, officialId);
+}
+
+// Dettaglio + storico: cached 1h per (versione, id). Stats cambiano solo a sync.
+const playerDetailCached = unstable_cache(
+  (v: string, officialId: number) => fetchPlayerDetail(v, officialId),
+  ["player-detail"],
+  { revalidate: 3600, tags: ["players"] }
+);
+
+async function fetchPlayerDetail(v: string, officialId: number): Promise<PlayerDetail | null> {
   const { data: pl } = await sb().from("players").select(PLAYER_COLS)
     .eq("dataset_version", v).eq("official_id", officialId).maybeSingle();
   if (!pl) return null;

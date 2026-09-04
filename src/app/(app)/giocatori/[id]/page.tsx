@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, Crosshair, MessagesSquare, Target } from "lucide-react";
 import { Eyebrow, Panel, PanelHead, RoleBadge, XIChip, Stat, btnGhost, cx } from "@/components/ui";
 import { getPlayerDetail } from "@/lib/store";
+import { getPlayerDetailSb, useSupabase } from "@/lib/store-sb";
 import { fmt, deltaTone, DELTA_LABEL } from "@/lib/player-ui";
 
 type Season = Record<string, unknown>;
@@ -40,7 +41,8 @@ function DeltaPill({ scarto }: { scarto: number | null }) {
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const detail = getPlayerDetail(Number(id));
+  const useSb = useSupabase();
+  const detail = useSb ? await getPlayerDetailSb(Number(id)) : getPlayerDetail(Number(id));
 
   if (!detail) {
     return (

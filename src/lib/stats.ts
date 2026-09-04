@@ -26,7 +26,7 @@ function getPlayerIdentity(db: DatabaseSync, dataset: string, officialId: number
   return p;
 }
 
-function normSquadra(s: string): string {
+export function normSquadra(s: string): string {
   return String(s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[.'’‘`]/g, "").replace(/\s+/g, " ").trim();
 }
 
@@ -49,44 +49,11 @@ export function spareggioIniziale(rNomeNorm: string, cands: string[]): string[] 
   return f.length ? f : cands;
 }
 
-// Statistiche complete di un giocatore: 4 stagioni piene + corrente, fonti fuse.
-export function statsGiocatore(db: DatabaseSync, dataset: string, officialId: number) {
-  const p = getPlayerIdentity(db, dataset, officialId);
-  const rows = db.prepare(
-    `SELECT * FROM player_stats
-     WHERE (official_id = ? OR (nome_norm = ? AND lower(squadra) = ?))
-     ORDER BY stagione, fonte`
-  ).all(officialId, p.nome_norm, normSquadra(p.squadra)) as unknown as (StatsRow & { official_id: number | null })[];
-  // Recupero righe non joinate (official_id NULL): stesso club + match
-  // tollerante, solo se candidato unico per (stagione, fonte). Mai forzato.
-  try {
-    const have = new Set(rows.map((r) => `${r.stagione}|${r.fonte}`));
-    const pool = db.prepare(
-      `SELECT * FROM player_stats WHERE official_id IS NULL AND lower(squadra) = ?`
-    ).all(normSquadra(p.squadra)) as unknown as (StatsRow & { official_id: number | null })[];
-    const perChiave = new Map<string, typeof pool>();
-    for (const r of pool) {
-      if (!stessoGiocatore(r.nome_norm, p.nome_norm)) continue;
-      const k = `${r.stagione}|${r.fonte}`;
-      if (have.has(k)) continue;
-      perChiave.set(k, [...(perChiave.get(k) ?? []), r]);
-    }
-    for (const [k, g] of perChiave) {
-      // Unico in (stagione, fonte) -> si prende; se >1, resta solo la riga
-      // la cui iniziale combacia coi token del listone ("Rossi M." vs "Rossi F.").
-      let pick = g.length === 1 ? g[0]! : null;
-      if (!pick) {
-        const f = g.filter((x) =>
-          p.nome_norm.split(" ").some((t) => t.startsWith(x.nome_norm.charAt(0)))
-        );
-        pick = f.length === 1 ? f[0]! : null;
-      }
-      if (pick) { rows.push(pick); have.add(k); }
-    }
-    rows.sort((a, b) => (a.stagione + a.fonte).localeCompare(b.stagione + b.fonte));
-  } catch { /* fallback assente: righe joinate restano */ }
+export type StatInputRow = StatsRow & { official_id: number | null };
 
-  // Fonde per stagione: numeri di conto da fantacalcio, avanzate da understat.
+// Fonde per stagione: numeri di conto da fantacalcio, avanzate da understat.
+// Pura: riusata da store locale e Supabase (stessi numeri ovunque).
+export function fondiStagioni(rows: StatInputRow[]) {
   const perStagione = new Map<string, Record<string, unknown>>();
   for (const r of rows) {
     const s = perStagione.get(r.stagione) ?? { stagione: r.stagione, fonti: [] as string[] };
@@ -128,9 +95,52 @@ export function statsGiocatore(db: DatabaseSync, dataset: string, officialId: nu
     nota: "scarto gol−xG molto positivo per 2+ stagioni = possibile sovrarendimento (rischio regressione); negativo = possibile scommessa (KB-STA-01)",
   };
   return {
-    giocatore: { official_id: p.official_id, nome: p.nome, squadra: p.squadra, ruolo: p.ruolo_classic },
     stagioni, sintesi,
     formula: "fonti fuse per stagione: conto/fantamedia da fantacalcio.it, xG/xA da Understat; NULL = dato assente, mai stimato",
+  };
+}
+
+// Statistiche complete di un giocatore: 4 stagioni piene + corrente, fonti fuse.
+// Variante SQLite: fetch righe + recupero non-joinate, poi fondiStagioni.
+export function statsGiocatore(db: DatabaseSync, dataset: string, officialId: number) {
+  const p = getPlayerIdentity(db, dataset, officialId);
+  const rows = db.prepare(
+    `SELECT * FROM player_stats
+     WHERE (official_id = ? OR (nome_norm = ? AND lower(squadra) = ?))
+     ORDER BY stagione, fonte`
+  ).all(officialId, p.nome_norm, normSquadra(p.squadra)) as unknown as StatInputRow[];
+  // Recupero righe non joinate (official_id NULL): stesso club + match
+  // tollerante, solo se candidato unico per (stagione, fonte). Mai forzato.
+  try {
+    const have = new Set(rows.map((r) => `${r.stagione}|${r.fonte}`));
+    const pool = db.prepare(
+      `SELECT * FROM player_stats WHERE official_id IS NULL AND lower(squadra) = ?`
+    ).all(normSquadra(p.squadra)) as unknown as StatInputRow[];
+    const perChiave = new Map<string, typeof pool>();
+    for (const r of pool) {
+      if (!stessoGiocatore(r.nome_norm, p.nome_norm)) continue;
+      const k = `${r.stagione}|${r.fonte}`;
+      if (have.has(k)) continue;
+      perChiave.set(k, [...(perChiave.get(k) ?? []), r]);
+    }
+    for (const [k, g] of perChiave) {
+      // Unico in (stagione, fonte) -> si prende; se >1, resta solo la riga
+      // la cui iniziale combacia coi token del listone ("Rossi M." vs "Rossi F.").
+      let pick = g.length === 1 ? g[0]! : null;
+      if (!pick) {
+        const f = g.filter((x) =>
+          p.nome_norm.split(" ").some((t) => t.startsWith(x.nome_norm.charAt(0)))
+        );
+        pick = f.length === 1 ? f[0]! : null;
+      }
+      if (pick) { rows.push(pick); have.add(k); }
+    }
+    rows.sort((a, b) => (a.stagione + a.fonte).localeCompare(b.stagione + b.fonte));
+  } catch { /* fallback assente: righe joinate restano */ }
+  const fused = fondiStagioni(rows);
+  return {
+    giocatore: { official_id: p.official_id, nome: p.nome, squadra: p.squadra, ruolo: p.ruolo_classic },
+    ...fused,
   };
 }
 

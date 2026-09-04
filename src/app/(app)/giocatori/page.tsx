@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { searchPlayers, getFilterOptions, isImported, getActiveVersion } from "@/lib/store";
+import { searchPlayersSb, getFilterOptionsSb, isImportedSb, getActiveVersionSb, useSupabase } from "@/lib/store-sb";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
 import { getState } from "@/lib/auction";
 import { Eyebrow, Panel, RoleBadge, XIChip, btnPrimary } from "@/components/ui";
@@ -12,9 +13,10 @@ export default async function Page({
   searchParams: Promise<{ q?: string; ruolo?: string; squadra?: string }>;
 }) {
   const { q = "", ruolo = "", squadra = "" } = await searchParams;
-  const imported = isImported();
-  const { ruoli, squadre } = getFilterOptions();
-  const rows = imported ? searchPlayers(q, ruolo, squadra) : [];
+  const useSb = useSupabase();
+  const imported = useSb ? await isImportedSb() : isImported();
+  const { ruoli, squadre } = useSb ? await getFilterOptionsSb() : getFilterOptions();
+  const rows = imported ? (useSb ? await searchPlayersSb(q, ruolo, squadra) : searchPlayers(q, ruolo, squadra)) : [];
   let pref = new Map<number, string>();
   try {
     const sid = latestSessionId();
@@ -39,7 +41,7 @@ export default async function Page({
         </Panel>
       ) : (
         <>
-          <p className="font-mono text-[11px] text-faint">Dataset {getActiveVersion()} · sempre Nome + Squadra + Ruolo (anti-omonimi)</p>
+          <p className="font-mono text-[11px] text-faint">Dataset {useSb ? await getActiveVersionSb() : getActiveVersion()} · sempre Nome + Squadra + Ruolo (anti-omonimi)</p>
           <form method="GET" className="flex flex-col gap-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" aria-hidden />

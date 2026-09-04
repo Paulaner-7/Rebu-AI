@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, Check, Database, FileSpreadsheet, Gavel, KeyRound, MessagesSquare, Search, X } from "lucide-react";
 import { getDbStatus } from "@/lib/db";
-import { getEnvChecklist } from "@/lib/env";
+import { getEnvChecklist, isSupabaseConfigured } from "@/lib/env";
 import { DATASET_META } from "@/lib/dataset-meta";
 import { getDatasetInfo } from "@/lib/store";
+import { getDatasetInfoSb } from "@/lib/store-sb";
 import { Eyebrow, Panel, PanelHead, cx } from "@/components/ui";
 
 const QUICK = [
@@ -12,11 +13,11 @@ const QUICK = [
   { href: "/chat", icon: MessagesSquare, title: "Chat", desc: "Interroga l'assistente su prezzi e strategie." },
 ];
 
-export default function Home() {
+export default async function Home() {
   const db = getDbStatus();
   const env = getEnvChecklist();
   const m = DATASET_META;
-  const info = getDatasetInfo();
+  const info = isSupabaseConfigured() ? await getDatasetInfoSb().catch(() => null) : getDatasetInfo();
 
   return (
     <main className="flex flex-col gap-6">

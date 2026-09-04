@@ -70,7 +70,7 @@ let pgClient: Sql | null = null;
 function pgConn(): Sql {
   if (!pgClient) {
     const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? "";
-    pgClient = postgres(url, { prepare: false, max: 2, idle_timeout: 10, connect_timeout: 8, query_timeout: 15000 });
+    pgClient = postgres(url, { prepare: false, max: 2, idle_timeout: 10, connect_timeout: 8 });
   }
   return pgClient;
 }

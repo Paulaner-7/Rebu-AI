@@ -100,6 +100,11 @@ async function nextSeq(db: Db, sid: number): Promise<number> {
   return r.m + 1;
 }
 
+// Payload eventi: oggetto diretto su PG (jsonb), stringa su SQLite (TEXT).
+function pay(db: Db, o: object): object | string {
+  return db.kind === "pg" ? o : JSON.stringify(o);
+}
+
 async function pushEvent(
   db: Db, sid: number, tipo: string, payload: object,
   idem?: string | null, compId?: number | null
@@ -108,7 +113,7 @@ async function pushEvent(
   try {
     const r = await db.prepare(
       "INSERT INTO auction_events (session_id, seq, tipo, payload, idempotency_key, compensates_id) VALUES (?,?,?,?,?,?)"
-    ).run(sid, seq, tipo, JSON.stringify(payload), idem ?? null, compId ?? null);
+    ).run(sid, seq, tipo, pay(db, payload), idem ?? null, compId ?? null);
     return Number(r.lastInsertRowid);
   } catch {
     throw new AuctionError("IDEMPOTENZA", "Operazione già registrata (doppio invio ignorato).");

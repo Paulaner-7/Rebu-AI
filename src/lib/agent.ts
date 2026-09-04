@@ -262,8 +262,10 @@ export function extractContract(testo: string): Contract | null {
 }
 
 async function logRun(db: Db, sid: number, domanda: string, tool: string[], risposta: string, modello: string, lat: number, ver: number) {
+  const pg = (await import("./pgdb")).usePostgres();
+  const j = (o: object): object | string => (pg ? o : JSON.stringify(o));
   await db.prepare("INSERT INTO agent_runs (session_id, domanda, tool_calls, output, state_version, latenza_ms) VALUES (?,?,?,?,?,?)")
-    .run(sid, domanda, JSON.stringify(tool), JSON.stringify({ risposta: risposta.slice(0, 2000), modello }), ver, lat);
+    .run(sid, domanda, j(tool), j({ risposta: risposta.slice(0, 2000), modello }), ver, lat);
 }
 
 export async function listModels(): Promise<{ id: string }[]> {

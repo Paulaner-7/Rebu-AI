@@ -19,6 +19,7 @@ async function step(name: string, fn: () => Promise<unknown>) {
 // Diagnosi lentezza prod: tempi reali di ogni accesso dati.
 export async function GET(req: Request) {
   if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
+  const only = new URL(req.url).searchParams.get("only") ?? "all";
   const { getSupabaseServer } = await import("@/lib/db");
   const sb = getSupabaseServer();
   const out: unknown[] = [];
@@ -31,6 +32,7 @@ export async function GET(req: Request) {
     if (error) throw new Error(error.message);
     return data?.length ?? -1;
   }));
+  if (only === "sb") return NextResponse.json({ ok: true, steps: out });
   const { writableDb, latestSessionId } = await import("@/lib/auction-store");
   out.push(await step("pg.kind", async () => writableDb().kind));
   out.push(await step("pg.latestSessionId", () => latestSessionId()));

@@ -15,8 +15,10 @@ export function getSupabaseServer(): SupabaseClient | null {
   if (!isSupabaseConfigured()) return null;
   if (cached) return cached;
   const { supabaseUrl, supabaseServiceKey } = getServerEnv();
+  const fetchWithTimeout: typeof fetch = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(12000) });
   cached = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false },
+    global: { fetch: fetchWithTimeout },
   });
   return cached;
 }

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   setupLeague, startAuction, nominate, sell, markUnsold, undoLast, control,
-  getState, rebuildCheck, AuctionError,
+  getState, rebuildCheck, ruoloCorrente, AuctionError,
 } from "../src/lib/auction";
 
 const SCHEMA = readFileSync(join(process.cwd(), "src", "lib", "schema.sqlite.sql"), "utf8");
@@ -57,6 +57,17 @@ describe("setup", () => {
 });
 
 describe("asta completa 8 squadre", () => {
+  it("ruoloCorrente avanza P→D quando tutti completano P", () => {
+    const { db, sid } = liveDb();
+    expect(ruoloCorrente(db, sid)).toBe("P");
+    let oid = 1;
+    for (let m = 1; m <= 8; m++) for (let k = 0; k < 3; k++) {
+      nominate(db, sid, oid);
+      sell(db, sid, { officialId: oid, managerId: m, prezzo: 1, idem: `rp${oid}` });
+      oid++;
+    }
+    expect(ruoloCorrente(db, sid)).toBe("D");
+  });
   it("200 acquisti a 1 credito: rose esatte, crediti mai negativi, rebuild ok", () => {
     const { db, sid } = liveDb();
     const need: Record<string, number> = { P: 3, D: 8, C: 8, A: 6 };

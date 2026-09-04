@@ -31,6 +31,6 @@ export function getDbStatus() {
     note:
       provider === "supabase"
         ? "Supabase configurato."
-        : "Mock locale: nessun secret impostato. Dati mostrati da verifica diretta cartella dati/.",
+        : "Database auto da cartella dati/ a ogni apertura. Nessun import manuale.",
   };
 }

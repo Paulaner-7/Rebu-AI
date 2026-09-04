@@ -3,6 +3,7 @@ import { ArrowRight, Check, Database, FileSpreadsheet, Gavel, KeyRound, Messages
 import { getDbStatus } from "@/lib/db";
 import { getEnvChecklist } from "@/lib/env";
 import { DATASET_META } from "@/lib/dataset-meta";
+import { getDatasetInfo } from "@/lib/store";
 import { Eyebrow, Panel, PanelHead, cx } from "@/components/ui";
 
 const QUICK = [
@@ -15,6 +16,7 @@ export default function Home() {
   const db = getDbStatus();
   const env = getEnvChecklist();
   const m = DATASET_META;
+  const info = getDatasetInfo();
 
   return (
     <main className="flex flex-col gap-6">
@@ -56,6 +58,10 @@ export default function Home() {
               <dd className="font-mono font-semibold">{db.provider}</dd>
             </div>
             <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-muted">Dataset</dt>
+              <dd className="font-mono font-semibold">{info ? `${info.version} · auto` : "non caricato"}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
               <dt className="text-muted">Nota</dt>
               <dd className="text-right text-muted">{db.note}</dd>
             </div>
@@ -67,7 +73,7 @@ export default function Home() {
           <dl className="flex flex-col gap-2 text-sm">
             <div className="flex items-baseline justify-between gap-3">
               <dt className="text-muted">Listone</dt>
-              <dd className="tnum font-mono font-semibold">{m.listone.tutti} <span className="text-faint">+{m.listone.ceduti} ceduti · {m.listone.squadre} sq.</span></dd>
+              <dd className="tnum font-mono font-semibold">{info ? info.totale : m.listone.tutti} <span className="text-faint">+{m.listone.ceduti} ceduti · {info ? info.squadre : m.listone.squadre} sq.</span></dd>
             </div>
             <div className="flex items-baseline justify-between gap-3">
               <dt className="text-muted">Guida</dt>

@@ -51,6 +51,34 @@ export function prezzoRiferimento(db: DatabaseSync, dataset: string, officialId:
   return { valore: m, formula: "media Qt.A reparto (nessun dato individuale)", input: { ruolo: p.ruolo_classic } };
 }
 
+// 1b. prezzoPrevisto: dove CHIUDE asta, non quotazione listone.
+// Base = valore mercato (FVM/2, es. Malen 450/2 = 225) corretto per momentum
+// ultime stagioni: crescita Qt spinge prezzo, crollo lo affossa. Clamp 0.7–1.3.
+// Inflazione live applicata dopo (vedi tettoConsigliato.adattato).
+export function prezzoPrevisto(db: DatabaseSync, dataset: string, officialId: number) {
+  const p = getPlayer(db, dataset, officialId);
+  const base = p.fvm != null
+    ? { v: p.fvm / 2, fonte: "FVM / 2 (valore mercato)" }
+    : (() => {
+        const med = median([p.qt_2526, p.qt_2425, p.qt_2324, p.qt_2223, p.qt_a]);
+        return med != null
+          ? { v: med, fonte: "mediana storiche (FVM assente)" }
+          : { v: mediaReparto(db, dataset, p.ruolo_classic), fonte: "media reparto (nessun dato)" };
+      })();
+  let kTrend = 1;
+  let trend = "storiche insufficienti: neutro";
+  if (p.qt_2526 != null && p.qt_2425 != null && p.qt_2425 > 0) {
+    const ratio = p.qt_2526 / p.qt_2425;
+    kTrend = Math.min(1.3, Math.max(0.7, 0.5 + 0.5 * ratio));
+    trend = `momentum ${p.qt_2425}→${p.qt_2526} (×${Math.round(kTrend * 100) / 100})`;
+  }
+  const valore = Math.round(base.v * kTrend);
+  return {
+    valore, formula: `${base.fonte} × trend`,
+    input: { base: Math.round(base.v * 10) / 10, kTrend: Math.round(kTrend * 100) / 100, trend, qt_2526: p.qt_2526, qt_2425: p.qt_2425 },
+  };
+}
+
 // 2. tettoRilancio(mio manager, giocatore)
 export function tettoRilancio(db: DatabaseSync, sid: number, managerId: number, officialId: number) {
   const st = managerStates(db, sid);
@@ -98,21 +126,22 @@ export function inflazioneAsta(db: DatabaseSync, sid: number) {
 
 export function tettoConsigliato(db: DatabaseSync, sid: number, managerId: number, officialId: number) {
   const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
-  const rif = prezzoRiferimento(db, ds, officialId);
+  const prev = prezzoPrevisto(db, ds, officialId);
   const tet = tettoRilancio(db, sid, managerId, officialId);
   const p = getPlayer(db, ds, officialId);
   const infl = inflazioneAsta(db, sid).reparti[p.ruolo_classic].valore;
-  const adattato = Math.round(rif.valore * infl);
+  const adattato = Math.round(prev.valore * infl);
   return {
-    riferimento: rif.valore, inflazioneReparto: infl,
+    previsto: prev.valore, formulaPrevisto: prev.formula, inflazioneReparto: infl,
     adattato, tettoMax: tet.tetto,
     consigliato: Math.min(adattato, tet.tetto),
-    formula: "consigliato = min(riferimento × inflazioneReparto, tettoMax)",
+    formula: "soglia = min(previstoAggiudicazione × inflazioneReparto, tettoMax)",
   };
 }
 
 // 4. prossimeChiamate: ranking deterministico
-export function prossimeChiamate(db: DatabaseSync, sid: number, managerId: number, top = 5) {
+// rankAll: base condivisa con rimanentiRuolo (stesso score, stessi motivi).
+function rankAll(db: DatabaseSync, sid: number, managerId: number) {
   const s = db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string };
   const { rosa } = leagueRules(db);
   const ms = managerStates(db, sid);
@@ -146,11 +175,82 @@ export function prossimeChiamate(db: DatabaseSync, sid: number, managerId: numbe
     if (mod && r.ruolo === "P" && (r.qt ?? 0) >= 15) { bonusMod += 8; motivi.push("modificatore: P clean-sheet"); }
     if (vuotiMiei > 0) motivi.push(`buco rosa: ${vuotiMiei} slot ${r.ruolo} liberi`);
     const score = Math.round(100 * need * (0.5 + 0.5 * quality) + (r.tit ? 10 : 0) + bonusMod + scarsita);
-    return { official_id: r.o, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo, score, motivi,
+    return { official_id: r.o, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo, qt: r.qt, fvm: r.fvm, tit: r.tit, score, motivi,
       formula: "100×need×(0.5+0.5×qualità) + 10 se XI + 8 se bonusMod + 150 se pupillo (X esclusi) + 2×scarsità" };
   });
   rank.sort((a, b) => b.score - a.score);
-  return { top: rank.slice(0, top), modificatore: mod ? "on" : "off", formula: "need=1+slotVuotiMiei (0.2 se ruolo pieno); qualità=Qt/maxQt ruolo; scarsità=max(0,bisognoLega−disponibili)" };
+  return { rank, mod: mod ? "on" : "off" };
+}
+
+export function prossimeChiamate(db: DatabaseSync, sid: number, managerId: number, top = 5) {
+  const { rank, mod } = rankAll(db, sid, managerId);
+  const top5 = rank.slice(0, top).map((r) => ({
+    official_id: r.official_id, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo,
+    score: r.score, motivi: r.motivi, formula: r.formula,
+  }));
+  return { top: top5, modificatore: mod, formula: "need=1+slotVuotiMiei (0.2 se ruolo pieno); qualità=Qt/maxQt ruolo; scarsità=max(0,bisognoLega−disponibili)" };
+}
+
+// 4b. rimanentiRuolo: dopo chiamata di ruolo R, lista ordinata per score con
+// statistiche (Qt, FVM, titolarità) + riferimento e tetto squadra owner.
+export function rimanentiRuolo(db: DatabaseSync, sid: number, managerId: number, ruolo: string, limit = 30) {
+  const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const { rank } = rankAll(db, sid, managerId);
+  return rank
+    .filter((r) => r.ruolo === ruolo)
+    .slice(0, Math.min(Math.max(limit, 1), 60))
+    .map((r) => ({
+      o: r.official_id, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo,
+      qt: r.qt, fvm: r.fvm, titolare: r.tit,
+      rif: prezzoRiferimento(db, ds, r.official_id).valore,
+      tetto: tettoConsigliato(db, sid, managerId, r.official_id).consigliato,
+      score: r.score, motivi: r.motivi,
+    }));
+}
+
+// 4c. verdettoRialzo: dopo ogni chiamata, Rebu AI dice ad owner se ALZARE,
+// TENTENNARE o MOLLARE. Soglia = prezzo previsto aggiudicazione (non quotazione).
+export type Verdetto = {
+  verdetto: "ALZA" | "TENTENNA" | "MOLLA";
+  titolo: string; dettaglio: string;
+  numeri: { offerta: number; previsto: number; adattato: number; tetto: number };
+};
+
+export function verdettoRialzo(db: DatabaseSync, sid: number, managerId: number, officialId: number, offerta: number): Verdetto {
+  const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const p = getPlayer(db, ds, officialId);
+  const t = tettoConsigliato(db, sid, managerId, officialId);
+  const numeri = { offerta, previsto: t.previsto, adattato: t.adattato, tetto: t.tettoMax };
+  const ms = managerStates(db, sid);
+  const mine = ms.find((x) => x.id === managerId);
+  const slotLiberi = mine ? mine.slot[p.ruolo_classic].totali - mine.slot[p.ruolo_classic].usati : 0;
+  if (slotLiberi <= 0) {
+    return { verdetto: "MOLLA", titolo: "Molla: slot pieni", dettaglio: `Hai già tutti i ${p.ruolo_classic}. Ogni credito qui è sprecato.`, numeri };
+  }
+  if (offerta > t.tettoMax) {
+    return { verdetto: "MOLLA", titolo: "Molla: oltre tuo tetto", dettaglio: `A ${offerta} non ti resterebbe 1 credito per slot vuoti (max ${t.tettoMax}). Lascialo andare.`, numeri };
+  }
+  if (offerta <= t.adattato) {
+    const margine = t.adattato - offerta;
+    return { verdetto: "ALZA", titolo: "Alza: sotto prezzo previsto", dettaglio: `Chiude intorno a ${t.previsto} (adattato ${t.adattato}), ora a ${offerta}: margine ${margine}. Rilancia fino a ${Math.min(t.adattato, t.tettoMax)}.`, numeri };
+  }
+  const pref = db.prepare("SELECT tipo FROM preferenze WHERE dataset_version=? AND official_id=?").get(ds, officialId) as { tipo: string } | undefined;
+  const extra = p.is_titolare ? " È titolare XI." : "";
+  const pupillo = pref?.tipo === "W" ? " È tuo pupillo." : "";
+  // TENTENNA = range fisso 10 crediti oltre consigliato. Oltre → STOP (MOLLA).
+  const limite = t.consigliato + 10;
+  if (offerta <= limite) {
+    return {
+      verdetto: "TENTENNA", titolo: `Tentenna: range 10 fino a ${limite}`,
+      dettaglio: `Sopra previsto (${t.adattato}) ma dentro range (consigliato ${t.consigliato} + 10). Alza solo se lo vuoi davvero.${extra}${pupillo} Oltre ${limite} → stop.`,
+      numeri,
+    };
+  }
+  return {
+    verdetto: "MOLLA", titolo: "Molla: fuori range",
+    dettaglio: `Offerta ${offerta} oltre range (consigliato ${t.consigliato} + 10 = ${limite}). Stop: non inseguire.`,
+    numeri,
+  };
 }
 
 // 5. matriceLega: residui + buchi per ruolo + max spesa

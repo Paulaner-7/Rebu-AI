@@ -90,7 +90,7 @@ export default function SettingsForm({ editable, astaAperta }: { editable: boole
       </Panel>
 
       <Panel>
-        <PanelHead icon={DatabaseBackup} title="Backup emergenza" />
+        <PanelHead icon={DatabaseBackup} title="Backup emergenza" hint="rose+eventi+preferenze+impostazioni" />
         <div className="flex gap-2">
           <a href="/api/backup" className={cx(btnGhost, "flex-1")}>Scarica JSON</a>
           <label className={cx(btnGhost, "flex-1")}>

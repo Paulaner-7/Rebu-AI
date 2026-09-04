@@ -151,6 +151,18 @@ export function managerStates(db: DatabaseSync, sid: number): ManagerState[] {
   });
 }
 
+// Ruolo corrente asta: primo reparto in ordine dove almeno una squadra ha slot
+// liberi. Tutti completi P → si passa a D, poi C, poi A. Null = rose complete.
+export function ruoloCorrente(db: DatabaseSync, sid: number): string | null {
+  const ord = db.prepare("SELECT value FROM settings WHERE key='ordine_reparti'").get() as { value: string } | undefined;
+  const ruoli = (ord?.value ?? "P,D,C,A").split(",").map((r) => r.trim()).filter(Boolean);
+  const ms = managerStates(db, sid);
+  for (const r of ruoli) {
+    if (ms.some((m) => (m.slot[r]?.usati ?? 0) < (m.slot[r]?.totali ?? 0))) return r;
+  }
+  return null;
+}
+
 export function getState(db: DatabaseSync, sid: number) {
   ensureExtras(db);
   const s = getSession(db, sid);
@@ -159,6 +171,17 @@ export function getState(db: DatabaseSync, sid: number) {
         s.current_nomination
       ) as { o: number; nome: string; squadra: string; ruolo: string } | undefined)
     : null;
+  // Chi ha chiamato giocatore corrente (ultima NOMINATE su player_id).
+  let chiamatoDa: { id: number; nome: string } | null = null;
+  if (s.current_nomination) {
+    const n = db.prepare(
+      `SELECT payload FROM auction_events WHERE session_id=? AND tipo='NOMINATE'
+       AND json_extract(payload,'$.player_id')=? ORDER BY seq DESC LIMIT 1`
+    ).get(sid, s.current_nomination) as { payload: string } | undefined;
+    const nd = n ? (JSON.parse(n.payload) as { nominato_da?: number }).nominato_da : undefined;
+    if (nd) chiamatoDa = db.prepare("SELECT id, nome FROM managers WHERE id=?").get(nd) as { id: number; nome: string } | null;
+  }
+  if (nomination && chiamatoDa) (nomination as { chiamatoDa?: unknown }).chiamatoDa = chiamatoDa;
   const unsold = (
     db.prepare(
       "SELECT payload FROM auction_events WHERE session_id=? AND tipo='UNSOLD' ORDER BY seq DESC LIMIT 20"
@@ -169,7 +192,10 @@ export function getState(db: DatabaseSync, sid: number) {
   return {
     session: { id: s.id, stato: s.stato, dataset: s.dataset_version, versione: s.state_version },
     managers: managerStates(db, sid),
-    nomination, unsoldUltimi: unsold, eventi: events, acquisti: bought,
+    nomination, ultimaChiamata: ultimaChiamata(db, sid),
+    prossimoChiamante: nomination ? null : turnoChiamata(db, sid),
+    ruoloCorrente: ruoloCorrente(db, sid),
+    unsoldUltimi: unsold, eventi: events, acquisti: bought,
   };
 }
 
@@ -200,19 +226,24 @@ export function updateManagers(db: DatabaseSync, sid: number, managers: ManagerI
 export function dumpBackup(db: DatabaseSync, sid: number) {
   const s = getSession(db, sid);
   return {
-    app: "Rebu AI", backup: 1, at: new Date().toISOString(),
+    app: "Rebu AI", backup: 2, at: new Date().toISOString(),
     dataset: s.dataset_version, stato: s.stato, versione: s.state_version,
     managers: db.prepare("SELECT nome, nome_squadra, note, is_owner, crediti_iniziali FROM managers ORDER BY id").all(),
     events: db.prepare("SELECT seq, tipo, payload, idempotency_key, compensates_id FROM auction_events WHERE session_id=? ORDER BY seq").all(sid),
+    settings: db.prepare("SELECT key, value FROM settings").all(),
+    preferenze: db.prepare("SELECT official_id, tipo, nota FROM preferenze WHERE dataset_version=?").all(s.dataset_version),
+    note: db.prepare("SELECT testo FROM strategy_notes ORDER BY id").all(),
   };
 }
 
 // Ripristino: ricrea sessione+rose dagli eventi (fonte verità). Stato PAUSA per verifica.
 export function restoreBackup(db: DatabaseSync, b: Record<string, unknown>) {
   ensureExtras(db);
-  if (b.app !== "Rebu AI" || b.backup !== 1) throw new AuctionError("BACKUP", "File non valido.");
+  if (b.app !== "Rebu AI" || (b.backup !== 1 && b.backup !== 2)) throw new AuctionError("BACKUP", "File non valido.");
   const live = db.prepare("SELECT id FROM auction_sessions WHERE stato IN ('LIVE','PAUSA')").get();
   if (live) throw new AuctionError("ASTA_APERTA", "Ripristino vietato ad asta aperta.");
+  const ds = db.prepare("SELECT version FROM dataset_versions WHERE version=?").get(b.dataset as string);
+  if (!ds) throw new AuctionError("DATASET", `Dataset ${b.dataset} assente: importa dati prima di ripristinare.`);
   const mans = b.managers as { nome: string; nome_squadra: string; note: string; is_owner: number | boolean; crediti_iniziali: number }[];
   checkManagers(mans.map((m) => ({ nome: m.nome, nome_squadra: m.nome_squadra, note: String(m.note ?? ""), is_owner: !!m.is_owner })));
   db.exec("BEGIN");
@@ -245,8 +276,26 @@ export function restoreBackup(db: DatabaseSync, b: Record<string, unknown>) {
     for (const e of evs) {
       if (e.tipo !== "SELL" || compensatedSeq.has(e.seq)) continue;
       const p = JSON.parse(e.payload);
-      const prow = db.prepare("SELECT id FROM players WHERE dataset_version=? AND official_id=?").get(b.dataset as string, p.official_id) as { id: number };
+      const prow = db.prepare("SELECT id FROM players WHERE dataset_version=? AND official_id=?").get(b.dataset as string, p.official_id) as { id: number } | undefined;
+      if (!prow) throw new AuctionError("DATASET", `Giocatore ${p.official_id} assente in dataset ${b.dataset}: importa dati giusti.`);
       insP.run(sid, prow.id, p.manager_id, p.prezzo, evId.get(e.seq) ?? null);
+    }
+    // Extra backup v2: preferenze, note, settings (chiavi lega note).
+    if (b.backup === 2) {
+      db.prepare("DELETE FROM preferenze WHERE dataset_version=?").run(b.dataset as string);
+      const insPr = db.prepare("INSERT INTO preferenze (dataset_version, official_id, tipo, nota) VALUES (?,?,?,?)");
+      for (const pr of (b.preferenze ?? []) as { official_id: number; tipo: string; nota: string }[]) {
+        insPr.run(b.dataset as string, pr.official_id, pr.tipo, pr.nota ?? "");
+      }
+      db.exec("DELETE FROM strategy_notes");
+      const insN = db.prepare("INSERT INTO strategy_notes (testo) VALUES (?)");
+      for (const n of (b.note ?? []) as { testo: string }[]) insN.run(n.testo);
+      const setK = db.prepare("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+      for (const s of (b.settings ?? []) as { key: string; value: string }[]) {
+        if (["crediti","rosa_P","rosa_D","rosa_C","rosa_A","modo","modificatore_default","ordine_reparti","modello_default","dataset_attivo"].includes(s.key)) {
+          setK.run(s.key, s.value);
+        }
+      }
     }
     db.exec("COMMIT");
     return sid;
@@ -310,19 +359,82 @@ export function startAuction(db: DatabaseSync, sid: number, expected?: number): 
   }
 }
 
-export function nominate(db: DatabaseSync, sid: number, officialId: number, expected?: number) {
+// Turno di nomina: a giro tra manager in ordine di id. Ogni NOMINATE non
+// compensata fa avanzare giro, esito vendita/invenduto irrilevante.
+export function turnoChiamata(db: DatabaseSync, sid: number): { indice: number; managerId: number; nome: string } {
+  const mans = db.prepare("SELECT id, nome FROM managers ORDER BY id").all() as { id: number; nome: string }[];
+  if (!mans.length) throw new AuctionError("MANAGER", "Squadre assenti.");
+  const n = (db.prepare(
+    `SELECT COUNT(*) AS n FROM auction_events e WHERE session_id=? AND tipo='NOMINATE'
+     AND NOT EXISTS (SELECT 1 FROM auction_events c WHERE c.session_id=? AND c.tipo='COMPENSATE' AND c.compensates_id=e.id)`
+  ).get(sid, sid) as { n: number }).n;
+  const m = mans[n % mans.length];
+  return { indice: n % mans.length, managerId: m.id, nome: m.nome };
+}
+
+// Ultima chiamata (rialzo) su nomina corrente: ultimo BID non compensato
+// DOPO ultima NOMINATE dello stesso giocatore (rinomina riparte da zero).
+export function ultimaChiamata(db: DatabaseSync, sid: number): { prezzo: number } | null {
+  const s = getSession(db, sid);
+  if (!s.current_nomination) return null;
+  const nom = db.prepare(
+    `SELECT seq FROM auction_events WHERE session_id=? AND tipo='NOMINATE'
+     AND json_extract(payload,'$.player_id')=? ORDER BY seq DESC LIMIT 1`
+  ).get(sid, s.current_nomination) as { seq: number } | undefined;
+  const dalSeq = nom?.seq ?? 0;
+  const r = db.prepare(
+    `SELECT payload FROM auction_events e WHERE session_id=? AND tipo='BID' AND seq>?
+     AND json_extract(payload,'$.player_id')=?
+     AND NOT EXISTS (SELECT 1 FROM auction_events c WHERE c.session_id=? AND c.tipo='COMPENSATE' AND c.compensates_id=e.id)
+     ORDER BY seq DESC LIMIT 1`
+  ).get(sid, dalSeq, s.current_nomination, sid) as { payload: string } | undefined;
+  return r ? { prezzo: (JSON.parse(r.payload) as { prezzo: number }).prezzo } : null;
+}
+
+export function nominate(db: DatabaseSync, sid: number, officialId: number, expected?: number, nominatoDa?: number) {
   const s = getSession(db, sid);
   if (s.stato !== "LIVE") throw new AuctionError("STATO", "Nomine solo a asta LIVE.");
   checkVersion(s, expected);
   const p = playerInDataset(db, s.dataset_version, officialId);
   if (soldTo(db, sid, p.id)) throw new AuctionError("GIA_ASSEGNATO", `${p.nome} già assegnato.`);
+  // Chi nomina: passato da UI oppure automatico a giro.
+  let chiamante = nominatoDa;
+  if (!chiamante) chiamante = turnoChiamata(db, sid).managerId;
+  const chim = db.prepare("SELECT id, nome FROM managers WHERE id=?").get(chiamante) as { id: number; nome: string } | undefined;
+  if (!chim) throw new AuctionError("MANAGER", "Chiamante assente.");
   db.exec("BEGIN");
   try {
     db.prepare("UPDATE auction_sessions SET current_nomination=? WHERE id=?").run(p.id, sid);
-    pushEvent(db, sid, "NOMINATE", { official_id: officialId, nome: p.nome, player_id: p.id });
+    pushEvent(db, sid, "NOMINATE", { official_id: officialId, nome: p.nome, player_id: p.id, nominato_da: chim.id });
     const v = bump(db, { ...s });
     db.exec("COMMIT");
-    return { versione: v, giocatore: p };
+    return { versione: v, giocatore: p, chiamatoDa: chim };
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+// Rialzo in ordine sparso: chiunque offre, ultima chiamata vince finché superata.
+// Stessa cifra re-inviata (doppio tap) = duplicato innocuo, non errore.
+export function bid(db: DatabaseSync, sid: number, args: { officialId: number; prezzo: number; expected?: number }) {
+  const s = getSession(db, sid);
+  if (s.stato !== "LIVE") throw new AuctionError("STATO", "Rialzi solo a asta LIVE.");
+  checkVersion(s, args.expected);
+  if (!Number.isInteger(args.prezzo) || args.prezzo < 1) throw new AuctionError("PREZZO", "Offerta intera >= 1.");
+  const p = playerInDataset(db, s.dataset_version, args.officialId);
+  if (s.current_nomination !== p.id) throw new AuctionError("NOMINA", "Rialzo solo su giocatore chiamato.");
+  const last = ultimaChiamata(db, sid);
+  if (last && args.prezzo === last.prezzo) return { duplicato: true as const, versione: s.state_version, prezzo: last.prezzo };
+  if (last && args.prezzo < last.prezzo) {
+    throw new AuctionError("RIALZO", `Ultima chiamata ${last.prezzo}: offri almeno ${last.prezzo}.`);
+  }
+  db.exec("BEGIN");
+  try {
+    pushEvent(db, sid, "BID", { official_id: args.officialId, player_id: p.id, prezzo: args.prezzo });
+    const v = bump(db, { ...s });
+    db.exec("COMMIT");
+    return { duplicato: false as const, versione: v, prezzo: args.prezzo };
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
@@ -338,6 +450,11 @@ export function sell(
   checkVersion(s, args.expected);
   if (!args.idem) throw new AuctionError("IDEMPOTENZA", "Chiave idempotenza obbligatoria.");
   if (!Number.isInteger(args.prezzo) || args.prezzo < 1) throw new AuctionError("PREZZO", "Prezzo intero >= 1.");
+  // STOP assegna a ultima chiamata: se ci sono rialzi, prezzo deve coincidere.
+  const last = ultimaChiamata(db, sid);
+  if (last && args.prezzo !== last.prezzo) {
+    throw new AuctionError("PREZZO", `STOP assegna a ultima chiamata (${last.prezzo}), non ${args.prezzo}.`);
+  }
   // Doppio click: stessa chiave = ritorno esito esistente, nessun duplicato
   const dup = db.prepare("SELECT payload FROM auction_events WHERE idempotency_key=?").get(args.idem) as
     | { payload: string }
@@ -403,7 +520,7 @@ export function undoLast(db: DatabaseSync, sid: number, expected?: number) {
   if (s.stato !== "LIVE" && s.stato !== "PAUSA") throw new AuctionError("STATO", "Undo solo in LIVE/PAUSA.");
   checkVersion(s, expected);
   const last = db.prepare(
-    `SELECT * FROM auction_events e WHERE session_id=? AND tipo IN ('NOMINATE','SELL','UNSOLD')
+    `SELECT * FROM auction_events e WHERE session_id=? AND tipo IN ('NOMINATE','SELL','UNSOLD','BID')
      AND NOT EXISTS (SELECT 1 FROM auction_events c WHERE c.session_id=? AND c.tipo='COMPENSATE' AND c.compensates_id=e.id)
      ORDER BY seq DESC LIMIT 1`
   ).get(sid, sid) as { id: number; tipo: string; payload: string } | undefined;

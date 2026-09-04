@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { join, dirname } from "node:path";
 import { readFileSync, mkdirSync } from "node:fs";
 import { ensureExtras, getState } from "./auction";
+import { ensureDataset } from "./ensure-dataset";
 
 // Vercel serverless: /var/task read-only, solo /tmp scrivibile (EFFIMERO: dati azzerati a ogni cold start).
 // Persistenza vera richiede switch runtime a Supabase (vedi DEPLOY.md).
@@ -11,6 +12,7 @@ let db: DatabaseSync | null = null;
 
 export function writableDb(): DatabaseSync {
   if (!db) {
+    ensureDataset(); // DB auto-pronto aprendo sito (idempotente, throttled)
     mkdirSync(dirname(DB_PATH), { recursive: true });
     db = new DatabaseSync(DB_PATH);
     db.exec("PRAGMA journal_mode = WAL");

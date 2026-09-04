@@ -1,14 +1,14 @@
 import { DatabaseSync } from "node:sqlite";
 import { writableDb, latestSessionId } from "./auction-store";
 import { getState, managerStates } from "./auction";
-import { prezzoRiferimento, tettoConsigliato, prossimeChiamate, matriceLega } from "./pricing";
+import { prezzoRiferimento, prezzoPrevisto, tettoConsigliato, prossimeChiamate, matriceLega } from "./pricing";
 import { searchAvailable } from "./catalog";
 
 export const GO_ENDPOINT = "https://opencode.ai/zen/go/v1/chat/completions";
 export const GO_MODELS = "https://opencode.ai/zen/go/v1/models";
-export const DEFAULT_MODEL = "muse-spark-1.3-contributor";
+export const DEFAULT_MODEL = "minimax-m3";
 
-export const SYSTEM_PROMPT = `Sei Rebu AI, assistente d'asta per il Fantacalcio Classic 2026/27 (8 squadre, 500 crediti, rose 3P/8D/8C/6A, modificatore difesa se attivo). Rispondi in italiano, breve e operativo. Non inventi MAI numeri: quotazioni, prezzi medi, crediti e statistiche arrivano solo dai tool; se un dato manca, dillo. Rispetta le preferenze utente: W = pupillo (spingilo), X = escluso (sconsiglialo salvo richiesta esplicita). Non decidi al posto dell'utente: proponi azione e prezzo massimo motivandoli, e ricorda che la decisione finale è sua, anche quando l'asta si scalda. Chiudi OGNI risposta su giocatore con blocco JSON: {"azione":"COMPRA|RILANCIA_FINO_A|PASSA","prezzoMassimoConsigliato":n,"confidenza":"BASSA|MEDIA|ALTA","motivazioni":["max 3"],"alternative":["Nomi"],"fonti":["tool usati"]}.`;
+export const SYSTEM_PROMPT = `Sei Rebu AI, esperto di Fantacalcio e tattico d'asta Classic 2026/27 (8 squadre, 500 crediti, rose 3P/8D/8C/6A, modificatore difesa se attivo). Velocità e sintesi prima di tutto. Rispondi in italiano. FORMATO OBBLIGATORIO, max 10 righe totali: riga 1-3 = opzioni numerate con prezzo max ciascuna (es. 1) Affondo Malen fino a 230); poi 1-2 righe di spiegazione con numeri chiave; zero frasi di contorno, zero ripetizioni. Tattiche: affondo top, attesa secondo giro, diversione obiettivo secondario. Leggi prima matriceLega e statoSquadra: muoviti su cosa fanno avversari (chi ha speso troppo, buchi rosa, chi può alzare). Soglia rialzo = prezzo previsto aggiudicazione (prezzoPrevisto), MAI quotazione listone. Priorità dati stagione 2026/27 IN CORSO (quotazione attuale, FVM, titolarità XI, ruolo, squadra): annate precedenti solo supporto, mai verdetto. Esempio: Provedel ottimo anni passati ma oggi secondo Inter → gioca poco → vale poco, trend passato non compensa. Non inventi MAI numeri: solo dai tool; se manca, dillo in una riga. Preferenze: W = pupillo (spingilo), X = escluso (sconsiglialo salvo richiesta). Non decidi tu: opzioni tra cui scegliere, decisione finale è sua. Chiudi OGNI risposta su giocatore con blocco JSON: {"azione":"COMPRA|RILANCIA_FINO_A|PASSA","prezzoMassimoConsigliato":n,"confidenza":"BASSA|MEDIA|ALTA","motivazioni":["max 3"],"alternative":["Nomi"],"fonti":["tool usati"]}.`;
 
 export type Contract = {
   azione: "COMPRA" | "RILANCIA_FINO_A" | "PASSA";
@@ -53,6 +53,7 @@ export const TOOL_DEFS = [
   { type: "function", function: { name: "matriceLega", description: "Residui e buchi rosa di tutte le 8 squadre", parameters: { type: "object", properties: {} } } },
   { type: "function", function: { name: "tettoRilancio", description: "Tetto spesa e consigliato per manager+giocatore", parameters: { type: "object", properties: { managerId: { type: "number" }, officialId: { type: "number" } }, required: ["managerId", "officialId"] } } },
   { type: "function", function: { name: "prezzoRiferimento", description: "Prezzo medio atteso giocatore con formula", parameters: { type: "object", properties: { officialId: { type: "number" } }, required: ["officialId"] } } },
+  { type: "function", function: { name: "prezzoPrevisto", description: "Dove chiude asta giocatore (momentum+mercato). Soglia rialzo, non quotazione", parameters: { type: "object", properties: { officialId: { type: "number" } }, required: ["officialId"] } } },
   { type: "function", function: { name: "prossimeChiamate", description: "Ranking chiamate per una squadra", parameters: { type: "object", properties: { managerId: { type: "number" }, top: { type: "number" } }, required: ["managerId"] } } },
 ] as const;
 
@@ -72,6 +73,7 @@ export function execTool(db: DatabaseSync, sid: number, dataset: string, name: s
     case "matriceLega": return matriceLega(db, sid);
     case "tettoRilancio": return tettoConsigliato(db, sid, Number(args.managerId), Number(args.officialId));
     case "prezzoRiferimento": return prezzoRiferimento(db, dataset, Number(args.officialId));
+    case "prezzoPrevisto": return prezzoPrevisto(db, dataset, Number(args.officialId));
     case "prossimeChiamate": return prossimeChiamate(db, sid, Number(args.managerId), Number(args.top ?? 5));
     default: return { errore: `tool ${name} sconosciuto` };
   }
@@ -89,11 +91,11 @@ export function fallbackAnswer(db: DatabaseSync, sid: number, dataset: string, v
     azione: t.tettoMax <= 1 ? "PASSA" : "RILANCIA_FINO_A",
     prezzoMassimoConsigliato: t.consigliato,
     confidenza: "MEDIA",
-    motivazioni: [`riferimento ${t.riferimento} × inflazione ${t.inflazioneReparto}`, `tetto rosa ${t.tettoMax}`, "motore deterministico, AI non configurata"],
-    alternative: [], fonti: ["prezzoRiferimento", "tettoRilancio"],
+    motivazioni: [`previsto chiusura ${t.previsto} × inflazione ${t.inflazioneReparto}`, `tetto rosa ${t.tettoMax}`, "motore deterministico, AI non configurata"],
+    alternative: [], fonti: ["prezzoPrevisto", "tettoRilancio"],
   };
   void domanda;
-  return { testo: `Motore (AI non configurata): ${st.nomination.nome} fino a ${t.consigliato}. Decisione finale tua.`, contract, fonti: ["prezzoRiferimento", "tettoRilancio"] };
+  return { testo: `Motore (AI non configurata): ${st.nomination.nome} chiude ~${t.previsto}, tu fino a ${t.consigliato}. Decisione finale tua.`, contract, fonti: ["prezzoPrevisto", "tettoRilancio"] };
 }
 
 export async function runChat(domanda: string, model?: string) {
@@ -116,14 +118,14 @@ export async function runChat(domanda: string, model?: string) {
     { role: "user", content: domanda },
   ];
   let testo = "";
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 2; i++) { // 2 giri max: risposte rapide, tool batchati insieme
     const r = await fetch(GO_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: mdl, messages, tools: TOOL_DEFS, tool_choice: "auto" }),
       signal: AbortSignal.timeout(20000),
     });
-    if (!r.ok) throw new Error(`OpenCode ${r.status}`);
+    if (!r.ok) throw new Error(`OpenCode ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const j = await r.json();
     const msg = j.choices?.[0]?.message;
     if (!msg) break;
@@ -138,7 +140,21 @@ export async function runChat(domanda: string, model?: string) {
       messages.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify(out).slice(0, 4000) });
     }
   }
+  // Se modello esaurisce giri solo con tool (niente testo), una sintesi finale senza tool.
+  if (!testo && usati.length > 0) {
+    messages.push({ role: "user", content: "Sintetizza ora in max 10 righe col formato obbligatorio. Niente altri tool." });
+    const r = await fetch(GO_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: mdl, messages, tool_choice: "none" }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (r.ok) testo = (await r.json()).choices?.[0]?.message?.content ?? "";
+  }
+  if (!testo) throw new Error("AI senza risposta (modello muto). Riprova o cambia modello in pagina Chat.");
   const contract = extractContract(testo);
+  // Blocco JSON resta in scheda contratto: via dal testo leggibile.
+  testo = testo.replace(/```json[\s\S]*?```/, "").replace(/\{[\s\S]*"azione"[\s\S]*\}/, "").replace(/\n{3,}/g, "\n\n").trim();
   logRun(db, sid, domanda, usati, testo, mdl, Date.now() - t0, versione);
   return { testo, contract, model: mdl, via: "ai", versione };
 }

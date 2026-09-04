@@ -1,9 +1,10 @@
 import { publicState, writableDb, defaultManagers } from "@/lib/auction-store";
-import { prezzoRiferimento, tettoConsigliato, inflazioneAsta, prossimeChiamate } from "@/lib/pricing";
+import { prezzoRiferimento, tettoConsigliato, inflazioneAsta, prossimeChiamate, verdettoRialzo } from "@/lib/pricing";
 import { Download } from "lucide-react";
 import { Eyebrow, StatusPill } from "@/components/ui";
 import Console from "./console";
 import Live from "./live";
+import AiDock from "./ai-dock";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,9 @@ export default function Page() {
     rif: prezzoRiferimento(db, state.session.dataset, state.nomination.o),
     tetto: tettoConsigliato(db, sid, owner.id, state.nomination.o),
   } : null;
+  const verdetto = state.nomination && owner && state.ultimaChiamata
+    ? verdettoRialzo(db, sid, owner.id, state.nomination.o, state.ultimaChiamata.prezzo)
+    : null;
   const topPagati = db.prepare(
     `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo
      FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
@@ -43,7 +47,8 @@ export default function Page() {
   ).all(sid) as { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
 
   return (
-    <main className="flex flex-col gap-3">
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_370px] lg:items-start lg:gap-4">
+    <main className="flex min-w-0 flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <div>
           <Eyebrow>Console</Eyebrow>
@@ -57,15 +62,28 @@ export default function Page() {
       <Live
         sid={sid} versione={state.session.versione} stato={state.session.stato}
         managers={plain(state.managers)} nomination={plain(state.nomination ?? null)}
+        ultimaChiamata={plain(state.ultimaChiamata)} verdetto={plain(verdetto)}
+        prossimoChiamante={plain(state.prossimoChiamante)} ruoloCorrente={state.ruoloCorrente}
         topPagati={plain(topPagati)} affari={plain(affari)}
         consiglio={plain(consiglio)} inflazione={plain(infl)} prossime={plain(next?.top ?? [])} ownerNome={owner?.nome ?? ""}
       />
       {state.session.stato === "CONCLUSA" && (
-        <a href={`/api/exports/csv?sessionId=${sid}`} className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-lg bg-ink px-4 font-semibold text-bg transition hover:bg-white active:scale-[0.98]">
-          <Download className="size-4" aria-hidden />
-          Scarica CSV Leghe Fantacalcio
-        </a>
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-muted">Asta finita: scarica backup completo (rose, eventi, preferenze, impostazioni). Se rompi tutto dopo, lo reimporti da Impostazioni.</p>
+          <div className="flex gap-2">
+            <a href="/api/backup" className="inline-flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-lg bg-signal px-4 font-semibold text-bg transition hover:brightness-110 active:scale-[0.98]">
+              <Download className="size-4" aria-hidden />
+              Scarica backup asta
+            </a>
+            <a href={`/api/exports/csv?sessionId=${sid}`} className="inline-flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-lg bg-ink px-4 font-semibold text-bg transition hover:bg-white active:scale-[0.98]">
+              <Download className="size-4" aria-hidden />
+              Scarica CSV Leghe Fantacalcio
+            </a>
+          </div>
+        </div>
       )}
     </main>
+    <AiDock />
+    </div>
   );
 }

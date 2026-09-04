@@ -1,10 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { ensureDataset } from "./ensure-dataset";
 
 const DB_PATH = join(process.cwd(), ".data", "rebu.db");
 
 let db: DatabaseSync | null = null;
 function conn(): DatabaseSync | null {
+  ensureDataset(); // DB auto-pronto aprendo sito (idempotente, throttled)
   if (db) return db;
   try {
     db = new DatabaseSync(DB_PATH, { readOnly: true });
@@ -63,6 +65,35 @@ export function searchPlayers(q: string, ruolo: string, squadra: string): Player
        ORDER BY qt_a DESC LIMIT 200`
     )
     .all(like, like, ruolo, ruolo, squadra, squadra) as PlayerRow[];
+}
+
+export type DatasetInfo = {
+  version: string;
+  totale: number;
+  perRuolo: { P: number; D: number; C: number; A: number };
+  squadre: number;
+  titolari: number;
+};
+
+// Conteggi reali dal DB (auto-importato). Null se DB assente.
+export function getDatasetInfo(): DatasetInfo | null {
+  const c = conn();
+  if (!c) return null;
+  try {
+    const version = getActiveVersion();
+    if (!version) return null;
+    const totale = (c.prepare("SELECT COUNT(*) AS n FROM players WHERE dataset_version=?").get(version) as { n: number }).n;
+    if (!totale) return null;
+    const perRuolo = { P: 0, D: 0, C: 0, A: 0 };
+    for (const r of c.prepare("SELECT ruolo_classic AS ruolo, COUNT(*) AS n FROM players WHERE dataset_version=? GROUP BY ruolo_classic").all(version) as { ruolo: string; n: number }[]) {
+      if (r.ruolo in perRuolo) perRuolo[r.ruolo as keyof typeof perRuolo] = r.n;
+    }
+    const squadre = (c.prepare("SELECT COUNT(DISTINCT squadra) AS n FROM players WHERE dataset_version=?").get(version) as { n: number }).n;
+    const titolari = (c.prepare("SELECT COUNT(*) AS n FROM players WHERE dataset_version=? AND is_titolare=1").get(version) as { n: number }).n;
+    return { version, totale, perRuolo, squadre, titolari };
+  } catch {
+    return null;
+  }
 }
 
 export function getFilterOptions(): { ruoli: string[]; squadre: string[] } {

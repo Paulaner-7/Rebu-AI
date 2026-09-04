@@ -1,12 +1,11 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Found } from "@/lib/catalog";
 import {
   ChevronDown,
   CircleStop,
-  Delete,
-  Gauge,
+  Crosshair,
   Pause,
   Play,
   Search,
@@ -29,16 +28,28 @@ export type Mgr = {
   slot: Record<string, { usati: number; totali: number }>;
   rosa: { nome: string; squadra: string; ruolo: string; prezzo: number }[];
 };
-export type Nom = { o: number; nome: string; squadra: string; ruolo: string } | null;
+export type Nom = { o: number; nome: string; squadra: string; ruolo: string; chiamatoDa?: { id: number; nome: string } | null } | null;
+export type Ultima = { prezzo: number } | null;
+export type VerdettoUI = {
+  verdetto: "ALZA" | "TENTENNA" | "MOLLA";
+  titolo: string; dettaglio: string;
+  numeri: { offerta: number; previsto: number; adattato: number; tetto: number };
+} | null;
 
-const TASTI = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "DEL"] as const;
+export type Rimanente = {
+  o: number; nome: string; squadra: string; ruolo: string;
+  qt: number | null; fvm: number | null; titolare: number;
+  rif: number; tetto: number; score: number; motivi: string[];
+};
+
 const RUOLI = ["P", "D", "C", "A"] as const;
 
-export default function Live({ sid, versione, stato, managers, nomination, topPagati, affari, consiglio, inflazione, prossime, ownerNome }: {
+export default function Live({ sid, versione, stato, managers, nomination, ultimaChiamata, verdetto, prossimoChiamante, ruoloCorrente, topPagati, affari, consiglio, inflazione, prossime, ownerNome }: {
   sid: number; versione: number; stato: string; managers: Mgr[]; nomination: Nom;
+  ultimaChiamata: Ultima; verdetto: VerdettoUI; prossimoChiamante: { indice: number; managerId: number; nome: string } | null; ruoloCorrente: string | null;
   topPagati: { nome: string; squadra: string; chi: string; prezzo: number }[];
   affari: { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
-  consiglio: { rif: { valore: number; formula: string }; tetto: { riferimento: number; inflazioneReparto: number; adattato: number; tettoMax: number; consigliato: number } } | null;
+  consiglio: { rif: { valore: number; formula: string }; tetto: { previsto: number; inflazioneReparto: number; adattato: number; tettoMax: number; consigliato: number } } | null;
   inflazione: { reparti: Record<string, { valore: number; n: number }>; totale: number };
   prossime: { nome: string; squadra: string; ruolo: string; score: number; motivi: string[] }[];
   ownerNome: string;
@@ -47,9 +58,23 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
   const [q, setQ] = useState("");
   const [ris, setRis] = useState<Found[]>([]);
   const [team, setTeam] = useState<number | null>(null);
-  const [prezzo, setPrezzo] = useState("");
+  const [rialzo, setRialzo] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Ruolo in vista: chiamato ora, altrimenti corrente asta (avanza P→D→C→A da solo
+  // quando tutti completano reparto). Visibile anche prima di chiamare.
+  const ruoloVista = nomination?.ruolo ?? ruoloCorrente;
+  const [rim, setRim] = useState<Rimanente[]>([]);
+
+  useEffect(() => {
+    if (!ruoloVista || (stato !== "LIVE" && stato !== "PAUSA" && stato !== "PRONTA")) { setRim([]); return; }
+    let stop = false;
+    fetch(`/api/players/rimanenti?sessionId=${sid}&ruolo=${ruoloVista}&limit=30`)
+      .then((r) => r.json())
+      .then((j) => { if (!stop && j.ok) setRim(j.data); })
+      .catch(() => {});
+    return () => { stop = true; };
+  }, [sid, ruoloVista, versione, stato]);
 
   async function go(fn: () => Promise<void>) {
     setErr("");
@@ -63,13 +88,9 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
     const j = await r.json();
     if (j.ok) setRis(j.data);
   }
-  function digito(t: string) {
-    if (t === "C") setPrezzo("");
-    else if (t === "DEL") setPrezzo((p) => p.slice(0, -1));
-    else setPrezzo((p) => (p + t).slice(0, 3));
-  }
   const teamSel = managers.find((m) => m.id === team);
-  const canSell = nomination && team && prezzo && !busy && stato === "LIVE";
+  const canBid = nomination && Number(rialzo) >= 1 && !busy && stato === "LIVE";
+  const canStop = nomination && team && ultimaChiamata && !busy && stato === "LIVE";
 
   return (
     <div className="flex flex-col gap-3">
@@ -84,44 +105,109 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
         </Panel>
       )}
 
-      {/* ——— CHIAMATA CORRENTE ——— */}
+      {/* ——— CHIAMATA CORRENTE: rialzi → verdetto → STOP ——— */}
       <Panel>
         {nomination ? (
           <>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <Eyebrow>Ora chiamato</Eyebrow>
+                <Eyebrow>Ora chiamato{nomination.chiamatoDa ? ` · da ${nomination.chiamatoDa.nome}` : ""}</Eyebrow>
                 <p className="font-display mt-1 truncate text-3xl font-extrabold uppercase leading-none tracking-tight">{nomination.nome}</p>
                 <p className="mt-1.5 text-sm text-muted">{nomination.squadra}</p>
               </div>
               <RoleBadge r={nomination.ruolo} className="mt-1 h-6 min-w-6 text-xs" />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg border border-line bg-panel2 px-4 py-3">
-              <div>
-                <Eyebrow>Offerta</Eyebrow>
-                <p className="tnum mt-0.5 font-mono text-4xl font-semibold text-signal">{prezzo || "—"}</p>
+            <div className="mt-4 rounded-lg border border-line bg-panel2 px-4 py-3 text-center">
+              <Eyebrow>Ultima chiamata</Eyebrow>
+              <p className="tnum mt-0.5 font-mono text-5xl font-semibold text-signal">{ultimaChiamata ? ultimaChiamata.prezzo : "—"}</p>
+            </div>
+
+            {/* Rialzo in ordine sparso */}
+            <div className="mt-3 flex gap-2">
+              <input
+                value={rialzo}
+                onChange={(e) => setRialzo(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+                inputMode="numeric"
+                placeholder="Crediti offerti"
+                aria-label="Crediti offerti nel rialzo"
+                className="tnum min-h-[56px] w-full rounded-lg border border-line bg-panel2 px-4 font-mono text-2xl font-semibold text-signal transition placeholder:text-base placeholder:font-sans placeholder:font-normal placeholder:text-faint focus:border-signal/60 focus:outline-none"
+              />
+              <button
+                disabled={!canBid}
+                onClick={() => { setBusy(true); go(() => post("/api/auction/bid", {
+                    sessionId: sid, officialId: nomination.o, prezzo: Number(rialzo), expected: versione,
+                  }).then(() => setRialzo(""))).finally(() => setBusy(false)); }}
+                className={cx(btnPrimary, "shrink-0 px-6")}
+              >
+                Chiama
+              </button>
+            </div>
+
+            {/* Finestra consiglio Rebu AI: appare a ogni chiamata */}
+            {verdetto && ultimaChiamata && (
+              <div
+                role="status"
+                className={cx(
+                  "mt-3 rounded-lg border p-3",
+                  verdetto.verdetto === "ALZA" && "border-d/40 bg-d/10",
+                  verdetto.verdetto === "TENTENNA" && "border-signal/40 bg-signal/10",
+                  verdetto.verdetto === "MOLLA" && "border-danger/40 bg-danger/10"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={cx(
+                    "rounded px-2 py-0.5 font-mono text-xs font-bold uppercase tracking-wider",
+                    verdetto.verdetto === "ALZA" && "bg-d/20 text-d",
+                    verdetto.verdetto === "TENTENNA" && "bg-signal/20 text-signal",
+                    verdetto.verdetto === "MOLLA" && "bg-danger/20 text-danger"
+                  )}>
+                    {verdetto.verdetto === "ALZA" ? "Alza" : verdetto.verdetto === "TENTENNA" ? "Tentenna" : "Molla"}
+                  </span>
+                  <p className="text-sm font-semibold">{verdetto.titolo}</p>
+                </div>
+                <p className="mt-1.5 text-sm text-muted">{verdetto.dettaglio}</p>
+                <p className="tnum mt-2 font-mono text-[11px] text-faint">
+                  offerta {verdetto.numeri.offerta} · previsto {verdetto.numeri.previsto} · adattato {verdetto.numeri.adattato} · tuo tetto {verdetto.numeri.tetto}
+                </p>
               </div>
-              <div className="text-right">
-                <Eyebrow>Acquirente</Eyebrow>
-                <p className="mt-1.5 truncate text-base font-semibold">{teamSel?.nome ?? "—"}</p>
+            )}
+
+            {/* STOP: vincitore + assegnazione a ultima chiamata */}
+            <div className="mt-4">
+              <Eyebrow>A chi va? (vincitore ultima chiamata)</Eyebrow>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {managers.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setTeam(m.id)}
+                    aria-pressed={team === m.id}
+                    className={cx(
+                      "min-h-[48px] cursor-pointer rounded-lg border px-3 text-left transition active:scale-[0.98]",
+                      team === m.id ? "border-signal bg-signal/10" : "border-line bg-panel2 hover:border-faint"
+                    )}
+                  >
+                    <b className="block truncate">{m.nome}</b>
+                    <span className="tnum font-mono text-xs text-muted">{m.residui} cr · max {m.maxSpesa}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="mt-3 flex gap-2">
               <button
-                disabled={!canSell}
+                disabled={!canStop}
                 onClick={() => { setBusy(true); go(() => post("/api/auction/sell", {
-                    sessionId: sid, officialId: nomination.o, managerId: team, prezzo: Number(prezzo),
+                    sessionId: sid, officialId: nomination.o, managerId: team, prezzo: ultimaChiamata!.prezzo,
                     idem: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, expected: versione,
-                  }).then(() => { setTeam(null); setPrezzo(""); })).finally(() => setBusy(false)); }}
+                  }).then(() => { setTeam(null); setRialzo(""); })).finally(() => setBusy(false)); }}
                 className={cx(btnPrimary, "flex-1")}
               >
-                Vendi
+                Stop · {teamSel ? `${teamSel.nome} a ${ultimaChiamata ? ultimaChiamata.prezzo : "—"}` : "scegli vincitore"}
               </button>
               <button
                 disabled={busy}
-                onClick={() => go(() => post("/api/auction/unsold", { sessionId: sid, officialId: nomination.o, expected: versione }).then(() => { setTeam(null); setPrezzo(""); }))}
+                onClick={() => go(() => post("/api/auction/unsold", { sessionId: sid, officialId: nomination.o, expected: versione }).then(() => { setTeam(null); setRialzo(""); }))}
                 className={btnGhost}
               >
                 Invenduto
@@ -145,11 +231,16 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
                 {stato === "LIVE" ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
               </button>
             </div>
+            {!ultimaChiamata && (
+              <p className="mt-2 font-mono text-[11px] text-faint">Nessuna chiamata: STOP attivo dopo primo rialzo. Senza offerte usa Invenduto.</p>
+            )}
           </>
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted">
-              {stato === "LIVE" ? "Nessuna chiamata. Cerca sotto e tocca un nome." : stato === "PRONTA" ? "Tutto pronto: avvia quando le squadre sono ai posti." : `Asta in stato ${stato}.`}
+              {stato === "LIVE"
+                ? (prossimoChiamante ? `Tocca a ${prossimoChiamante.nome} chiamare. Cerca sotto e tocca un nome.` : "Nessuna chiamata. Cerca sotto e tocca un nome.")
+                : stato === "PRONTA" ? "Tutto pronto: avvia quando le squadre sono ai posti." : `Asta in stato ${stato}.`}
             </p>
             {(stato === "LIVE" || stato === "PAUSA") && (
               <div className="flex gap-2">
@@ -213,104 +304,63 @@ export default function Live({ sid, versione, stato, managers, nomination, topPa
             )}
           </Panel>
 
-          {/* ——— ACQUIRENTE + PREZZO ——— */}
-          <Panel>
-            <Eyebrow>Acquirente</Eyebrow>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {managers.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setTeam(m.id)}
-                  aria-pressed={team === m.id}
-                  className={cx(
-                    "min-h-[48px] cursor-pointer rounded-lg border px-3 text-left transition active:scale-[0.98]",
-                    team === m.id ? "border-signal bg-signal/10" : "border-line bg-panel2 hover:border-faint"
-                  )}
-                >
-                  <b className="block truncate">{m.nome}</b>
-                  <span className="tnum font-mono text-xs text-muted">{m.residui} cr · max {m.maxSpesa}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4 flex items-baseline justify-between">
-              <Eyebrow>Prezzo</Eyebrow>
-              <p className="tnum font-mono text-3xl font-semibold text-signal">{prezzo || "—"}</p>
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {TASTI.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => digito(t)}
-                  aria-label={t === "DEL" ? "Cancella cifra" : t === "C" ? "Azzera prezzo" : `Cifra ${t}`}
-                  className="flex min-h-[56px] cursor-pointer items-center justify-center rounded-lg border border-line bg-panel2 font-mono text-xl font-semibold transition hover:border-faint active:scale-95"
-                >
-                  {t === "DEL" ? <Delete className="size-5" aria-hidden /> : t}
-                </button>
-              ))}
-            </div>
-            <div className="mt-2 flex gap-2">
-              <button onClick={() => setPrezzo((p) => String(Number(p || 0) + 1))} className={cx(btnGhost, "flex-1 font-mono")}>+1</button>
-              <button onClick={() => setPrezzo((p) => String(Number(p || 0) + 5))} className={cx(btnGhost, "flex-1 font-mono")}>+5</button>
-            </div>
-          </Panel>
+          {/* ——— ACQUIRENTE: rimosso, selezione vincitore dentro chiamata ——— */}
         </>
       )}
 
-      {/* ——— CONSIGLIO MOTORE ——— */}
-      <Panel>
-        <PanelHead icon={Gauge} title="Consiglio motore" hint="deterministico · no AI" />
-        <div className="flex flex-wrap gap-2">
-          {RUOLI.map((r) => (
-            <span key={r} className="flex items-center gap-1.5 rounded border border-line bg-panel2 px-2 py-1 font-mono text-xs">
-              <RoleBadge r={r} className="h-4 min-w-4 border-0 bg-transparent px-0 text-[10px]" />
-              <span className="tnum text-muted">{inflazione.reparti[r].valore}%</span>
-            </span>
-          ))}
-          <span className="flex items-center gap-1.5 rounded border border-line bg-panel2 px-2 py-1 font-mono text-xs text-muted">
-            tot <span className="tnum">{inflazione.totale}%</span>
-          </span>
-        </div>
-
-        {consiglio && nomination ? (
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Riferimento</p>
-              <p className="tnum mt-0.5 font-mono text-lg font-semibold">{consiglio.rif.valore}</p>
-              <p className="font-mono text-[10px] text-faint">{consiglio.rif.formula}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Adattato</p>
-              <p className="tnum mt-0.5 font-mono text-lg font-semibold">{consiglio.tetto.adattato}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Tetto {ownerNome}</p>
-              <p className="tnum mt-0.5 font-mono text-lg font-semibold">{consiglio.tetto.tettoMax}</p>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">Consigliato</p>
-              <p className="tnum mt-0.5 font-mono text-lg font-semibold text-signal">{consiglio.tetto.consigliato}</p>
-            </div>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted">Nomina un giocatore per vedere riferimento e tetto di {ownerNome}.</p>
-        )}
-
-        {prossime.length > 0 && (
-          <ol className="mt-3 flex flex-col gap-1.5 border-t border-line pt-3">
-            {prossime.map((p, i) => (
-              <li key={p.nome} className="flex items-baseline gap-3 text-sm">
-                <span className="tnum font-mono text-xs font-semibold text-signal">{String(i + 1).padStart(2, "0")}</span>
-                <span className="min-w-0 flex-1 truncate">
-                  <b>{p.nome}</b> <span className="text-muted">· {p.squadra}</span>
-                </span>
-                <RoleBadge r={p.ruolo} />
-                <span className="shrink-0 font-mono text-[11px] text-faint" title={p.motivi.join(", ")}>score {p.score}</span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </Panel>
+      {/* ——— RIMANENTI RUOLO ——— */}
+      {(stato === "LIVE" || stato === "PAUSA" || stato === "PRONTA") && ruoloVista && (
+        <Panel>
+          <PanelHead icon={Crosshair} title={`Rimanenti ${ruoloVista}`} hint={`${rim.length} disponibili · tocca per chiamare`} />
+          {rim.length === 0 ? (
+            <p className="text-sm text-faint">Caricamento…</p>
+          ) : (
+            <>
+              <ol className="flex flex-col gap-1.5">
+                {rim.slice(0, 3).map((p, i) => (
+                  <li key={p.o}>
+                    <button
+                      disabled={busy}
+                      onClick={() => go(() => post("/api/auction/nominate", { sessionId: sid, officialId: p.o, expected: versione }))}
+                      className="flex min-h-[56px] w-full cursor-pointer items-center gap-3 rounded-lg border border-signal/40 bg-signal/10 px-3 text-left transition hover:border-signal active:scale-[0.99]"
+                    >
+                      <span className="tnum font-mono text-xs font-semibold text-signal">{String(i + 1).padStart(2, "0")}</span>
+                      <span className="min-w-0 flex-1">
+                        <b>{p.nome}</b> <span className="text-muted">· {p.squadra}</span>
+                        {p.titolare ? <span className="ml-2"><XIChip /></span> : null}
+                        <span className="mt-0.5 block truncate font-mono text-[11px] text-faint" title={p.motivi.join(", ")}>{p.motivi.join(" · ")}</span>
+                      </span>
+                      <span className="shrink-0 text-right font-mono text-xs">
+                        <span className="tnum block font-semibold">rif {p.rif}</span>
+                        <span className="tnum block text-muted">tetto {p.tetto}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <ul className="mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
+                {rim.slice(3).map((p) => (
+                  <li key={p.o}>
+                    <button
+                      disabled={busy}
+                      onClick={() => go(() => post("/api/auction/nominate", { sessionId: sid, officialId: p.o, expected: versione }))}
+                      className="flex min-h-[48px] w-full cursor-pointer items-center gap-3 rounded-lg border border-line bg-panel2 px-3 text-left transition hover:border-faint active:scale-[0.99]"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        <b>{p.nome}</b> <span className="text-muted">· {p.squadra}</span>
+                        {p.titolare ? <span className="ml-2"><XIChip /></span> : null}
+                      </span>
+                      <span className="tnum shrink-0 font-mono text-xs text-muted">Qt {p.qt ?? "—"}</span>
+                      <span className="tnum shrink-0 font-mono text-xs text-muted">FVM {p.fvm ?? "—"}</span>
+                      <span className="tnum w-12 shrink-0 text-right font-mono text-xs font-semibold" title={`rif ${p.rif} · tetto ${p.tetto}`}>{p.rif}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Panel>
+      )}
 
       {/* ——— ROSE ——— */}
       <section className="flex flex-col gap-2" aria-label="Rose">

@@ -6,7 +6,7 @@ import { btnPrimary, cx, inputCls, Panel } from "@/components/ui";
 
 type Msg = { chi: "io" | "rebu"; testo: string; contract?: Contract | null; via?: string; model?: string };
 
-export default function ChatBox() {
+export default function ChatBox({ compact = false }: { compact?: boolean }) {
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [custom, setCustom] = useState("");
@@ -45,6 +45,7 @@ export default function ChatBox() {
 
   return (
     <div className="flex flex-col gap-3">
+      {!compact && (
       <Panel className="py-3">
         <div className="flex items-center gap-2">
           <Cpu className="size-4 shrink-0 text-signal" aria-hidden />
@@ -66,11 +67,12 @@ export default function ChatBox() {
         </div>
         {!configured && <p className="mt-2 font-mono text-[11px] text-faint">Chiave non impostata: risponde il motore.</p>}
       </Panel>
+      )}
 
       <div className="flex flex-col gap-2" aria-live="polite">
         {msgs.length === 0 && (
           <p className="py-10 text-center text-sm text-muted">
-            Chiedi al motore: prezzi, tetti, strategie per reparto.
+            {compact ? "Chiedi: chi puntare, budget reparto, tattica." : "Chiedi al motore: prezzi, tetti, strategie per reparto."}
           </p>
         )}
         {msgs.map((m, i) => (

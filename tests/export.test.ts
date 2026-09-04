@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { memDb } from "./helpers";
 import { writeFileSync } from "node:fs";
 import {
   validateLegheExport, generateLegheFantacalcioCsv, buildLegheExportFilename,
@@ -24,7 +25,7 @@ function base(): ExportInput {
 const IDS = new Set(Array.from({ length: 800 }, (_, i) => i + 1));
 
 describe("export Leghe", () => {
-  it("golden file byte-exatti + deterministico", () => {
+  it("golden file byte-exatti + deterministico", async () => {
     const csv = generateLegheFantacalcioCsv(base(), IDS);
     writeFileSync("/tmp/rebu-sample.csv", csv);
     expect(csv.startsWith("$,$,$\nSquadra 1,1,1\n")).toBe(true);
@@ -35,7 +36,7 @@ describe("export Leghe", () => {
     expect(csv.split("\n").filter((l) => l === "$,$,$").length).toBe(8);
     expect(csv.charCodeAt(0)).not.toBe(0xfeff); // niente BOM
   });
-  it("rifiuta: 7 squadre, doppio id, nome con virgola, rosa errata, overspend, id ignoto", () => {
+  it("rifiuta: 7 squadre, doppio id, nome con virgola, rosa errata, overspend, id ignoto", async () => {
     const b7 = base(); b7.teams.pop();
     expect(validateLegheExport(b7, IDS).some((e) => e.code === "SQUADRE")).toBe(true);
     const dup = base(); dup.teams[1].players[0].officialPlayerId = 1;
@@ -49,7 +50,7 @@ describe("export Leghe", () => {
     const unk = base(); unk.teams[0].players[0].officialPlayerId = 99999;
     expect(validateLegheExport(unk, IDS).some((e) => e.code === "ID_IGNOTO")).toBe(true);
   });
-  it("filename pattern", () => {
+  it("filename pattern", async () => {
     expect(buildLegheExportFilename("Rebu AI", new Date("2026-09-03"))).toBe("rebu-ai-leghe-rebu-ai-2026-09-03.csv");
   });
 });

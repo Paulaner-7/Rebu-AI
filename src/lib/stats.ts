@@ -2,7 +2,7 @@
 // Due fonti fuse per stagione: 'fantacalcio' (PV, MV, FM, gol, assist, rigori, cartellini)
 // e 'understat' (xG, xA, npxG, tiri, passaggi chiave). Nessun numero inventato:
 // se una fonte manca, il campo è null e la sintesi lo dichiara.
-import type { DatabaseSync } from "node:sqlite";
+import type { Db } from "./pgdb";
 
 export type StatsRow = {
   stagione: string; fonte: string; nome: string; nome_norm: string; squadra: string; ruolo: string;
@@ -18,8 +18,8 @@ export type StatsRow = {
 const METRICHE = new Set(["xg", "xa", "gol", "assist", "fantamedia", "media_voto", "presenze", "tiri", "passaggi_chiave"]);
 const ORDINE_STAGIONI = ["2022-23", "2023-24", "2024-25", "2025-26", "2026-27"];
 
-function getPlayerIdentity(db: DatabaseSync, dataset: string, officialId: number) {
-  const p = db.prepare(
+async function getPlayerIdentity(db: Db, dataset: string, officialId: number): Promise<{ official_id: number; nome: string; nome_norm: string; squadra: string; ruolo_classic: string }> {
+  const p = await db.prepare(
     "SELECT official_id, nome, nome_norm, squadra, ruolo_classic FROM players WHERE dataset_version=? AND official_id=?"
   ).get(dataset, officialId) as { official_id: number; nome: string; nome_norm: string; squadra: string; ruolo_classic: string } | undefined;
   if (!p) throw new Error(`Giocatore ${officialId} fuori dataset`);
@@ -102,9 +102,9 @@ export function fondiStagioni(rows: StatInputRow[]) {
 
 // Statistiche complete di un giocatore: 4 stagioni piene + corrente, fonti fuse.
 // Variante SQLite: fetch righe + recupero non-joinate, poi fondiStagioni.
-export function statsGiocatore(db: DatabaseSync, dataset: string, officialId: number) {
-  const p = getPlayerIdentity(db, dataset, officialId);
-  const rows = db.prepare(
+export async function statsGiocatore(db: Db, dataset: string, officialId: number) {
+  const p = await getPlayerIdentity(db, dataset, officialId);
+  const rows = await db.prepare(
     `SELECT * FROM player_stats
      WHERE (official_id = ? OR (nome_norm = ? AND lower(squadra) = ?))
      ORDER BY stagione, fonte`
@@ -113,7 +113,7 @@ export function statsGiocatore(db: DatabaseSync, dataset: string, officialId: nu
   // tollerante, solo se candidato unico per (stagione, fonte). Mai forzato.
   try {
     const have = new Set(rows.map((r) => `${r.stagione}|${r.fonte}`));
-    const pool = db.prepare(
+    const pool = await db.prepare(
       `SELECT * FROM player_stats WHERE official_id IS NULL AND lower(squadra) = ?`
     ).all(normSquadra(p.squadra)) as unknown as StatInputRow[];
     const perChiave = new Map<string, typeof pool>();
@@ -145,14 +145,14 @@ export function statsGiocatore(db: DatabaseSync, dataset: string, officialId: nu
 }
 
 // Classifica per metrica (solo disponibili, non ancora venduti se passi sessione).
-export function classificaStats(
-  db: DatabaseSync, metrica: string, ruolo = "", stagione = "", top = 10,
+export async function classificaStats(
+  db: Db, metrica: string, ruolo = "", stagione = "", top = 10,
 ) {
   const m = metrica.toLowerCase();
   if (!METRICHE.has(m)) return { errore: `metrica ${metrica} non valida`, valide: [...METRICHE] };
   const stag = stagione || "2026-27";
   const fonte = ["xg", "xa", "tiri", "passaggi_chiave"].includes(m) ? "understat" : "fantacalcio";
-  const rows = db.prepare(
+  const rows = await db.prepare(
     `SELECT ps.official_id, ps.nome, ps.squadra, ps.ruolo, ps.${m} AS valore, ps.presenze, ps.minuti
      FROM player_stats ps
      WHERE ps.stagione = ? AND ps.fonte = ? AND ps.${m} IS NOT NULL

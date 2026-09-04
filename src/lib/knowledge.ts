@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DatabaseSync } from "node:sqlite";
+import type { Db } from "./pgdb";
 
 export type KbBlock = {
   id: string;          // "KB-ECO-01"
@@ -119,23 +119,23 @@ export function kbDigest(maxChars = 900): string {
 }
 
 // Copia idempotente dei blocchi in strategy_notes (colonna testo, prefisso [KB-ID]).
-export function seedKb(db: DatabaseSync, path = KB_PATH): { inseriti: number; hash: string; saltato: boolean } {
+export async function seedKb(db: Db, path = KB_PATH): Promise<{ inseriti: number; hash: string; saltato: boolean }> {
   const { hash, blocks } = loadKb(path);
   if (!blocks.length) return { inseriti: 0, hash: "", saltato: true };
-  const cur = db.prepare("SELECT value FROM settings WHERE key='kb_hash'").get() as { value: string } | undefined;
+  const cur = await db.prepare("SELECT value FROM settings WHERE key='kb_hash'").get() as { value: string } | undefined;
   if (cur?.value === hash) return { inseriti: 0, hash, saltato: true };
-  db.exec("BEGIN");
+  await db.exec("BEGIN");
   try {
-    db.prepare("DELETE FROM strategy_notes WHERE testo LIKE '[KB-%'").run();
-    const ins = db.prepare("INSERT INTO strategy_notes (testo) VALUES (?)");
+    await db.prepare("DELETE FROM strategy_notes WHERE testo LIKE '[KB-%'").run();
+    const ins = await db.prepare("INSERT INTO strategy_notes (testo) VALUES (?)");
     for (const b of blocks) {
-      ins.run(`[${b.id}] (${b.sezione}) ${b.titolo ? b.titolo + " — " : ""}${b.testo}\ntag: ${b.tag.map((t) => "#" + t).join(" ")}`);
+      await ins.run(`[${b.id}] (${b.sezione}) ${b.titolo ? b.titolo + " — " : ""}${b.testo}\ntag: ${b.tag.map((t) => "#" + t).join(" ")}`);
     }
-    db.prepare("INSERT INTO settings (key, value) VALUES ('kb_hash', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(hash);
-    db.exec("COMMIT");
+    await db.prepare("INSERT INTO settings (key, value) VALUES ('kb_hash', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(hash);
+    await db.exec("COMMIT");
     return { inseriti: blocks.length, hash, saltato: false };
   } catch (e) {
-    db.exec("ROLLBACK");
+    await db.exec("ROLLBACK");
     throw e;
   }
 }

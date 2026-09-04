@@ -7,8 +7,8 @@ export const dynamic = "force-dynamic";
 const RUOLI = ["P", "D", "C", "A"] as const;
 const TOTALE_ROSA = 25;
 
-export default function Page() {
-  const { sid, state } = publicState();
+export default async function Page() {
+  const { sid, state } = await publicState();
   if (sid === null || state === null) {
     return (
       <main className="flex flex-col gap-4">
@@ -19,7 +19,7 @@ export default function Page() {
         <EmptyState
           icon={Shirt}
           title="Nessuna asta"
-          body={`Prepara asta da pagina Asta (partecipanti default: ${defaultManagers().map((m) => m.nome).join(", ")}). Rose appaiono qui a ogni STOP.`}
+          body={`Prepara asta da pagina Asta (partecipanti default: ${(await defaultManagers()).map((m) => m.nome).join(", ")}). Rose appaiono qui a ogni STOP.`}
         />
       </main>
     );

@@ -11,8 +11,8 @@ export const dynamic = "force-dynamic";
 
 const plain = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
-export default function Page() {
-  const { sid, state } = publicState();
+export default async function Page() {
+  const { sid, state } = await publicState();
   if (sid === null || state === null) {
     return (
       <main className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
@@ -21,31 +21,31 @@ export default function Page() {
           <h1 className="font-display mt-2 text-3xl font-extrabold uppercase tracking-tight">Asta</h1>
           <p className="mt-1 text-sm text-muted">Prepara l'asta: compila i nomi.</p>
         </header>
-        <Console sid={null} versione={0} stato="" managers={[]} defaults={defaultManagers()} />
+        <Console sid={null} versione={0} stato="" managers={[]} defaults={await defaultManagers()} />
       </main>
     );
   }
   const db = writableDb();
   const owner = state.managers.find((m) => m.is_owner === 1) ?? state.managers[0];
-  const infl = inflazioneAsta(db, sid);
-  const next = owner ? prossimeChiamate(db, sid, owner.id, 3) : null;
+  const infl = await inflazioneAsta(db, sid);
+  const next = owner ? await prossimeChiamate(db, sid, owner.id, 3) : null;
   const consiglio = state.nomination && owner ? {
-    rif: prezzoRiferimento(db, state.session.dataset, state.nomination.o),
-    tetto: tettoConsigliato(db, sid, owner.id, state.nomination.o),
+    rif: await prezzoRiferimento(db, state.session.dataset, state.nomination.o),
+    tetto: await tettoConsigliato(db, sid, owner.id, state.nomination.o),
   } : null;
   const verdetto = state.nomination && owner && state.ultimaChiamata
-    ? verdettoRialzo(db, sid, owner.id, state.nomination.o, state.ultimaChiamata.prezzo)
+    ? await verdettoRialzo(db, sid, owner.id, state.nomination.o, state.ultimaChiamata.prezzo)
     : null;
-  const topPagati = db.prepare(
+  const topPagati = (await db.prepare(
     `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo
      FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
      WHERE pu.session_id=? ORDER BY pu.prezzo DESC LIMIT 10`
-  ).all(sid) as { nome: string; squadra: string; chi: string; prezzo: number }[];
-  const affari = db.prepare(
-    `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo, CAST(pl.fvm/2 AS INT) AS rif
+  ).all(sid)) as { nome: string; squadra: string; chi: string; prezzo: number }[];
+  const affari = (await db.prepare(
+    `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo, CAST(pl.fvm/2.0 AS INT) AS rif
      FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
-     WHERE pu.session_id=? AND pl.fvm IS NOT NULL ORDER BY (pl.fvm/2 - pu.prezzo) DESC LIMIT 10`
-  ).all(sid) as { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
+     WHERE pu.session_id=? AND pl.fvm IS NOT NULL ORDER BY (pl.fvm/2.0 - pu.prezzo) DESC LIMIT 10`
+  ).all(sid)) as { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
 
   return (
     <div className="flex flex-col gap-3">

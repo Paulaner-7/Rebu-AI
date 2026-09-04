@@ -42,7 +42,7 @@ function DeltaPill({ scarto }: { scarto: number | null }) {
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const useSb = useSupabase();
-  const detail = useSb ? await getPlayerDetailSb(Number(id)) : getPlayerDetail(Number(id));
+  const detail = useSb ? await getPlayerDetailSb(Number(id)) : await getPlayerDetail(Number(id));
 
   if (!detail) {
     return (

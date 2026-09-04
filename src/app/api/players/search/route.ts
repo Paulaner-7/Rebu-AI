@@ -7,13 +7,13 @@ import { searchAvailable } from "@/lib/catalog";
 export async function GET(req: Request) {
   if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const u = new URL(req.url);
-  const sid = Number(u.searchParams.get("sessionId") ?? latestSessionId() ?? 0);
+  const sid = Number(u.searchParams.get("sessionId") ?? (await latestSessionId()) ?? 0);
   if (!sid) return NextResponse.json({ ok: true, data: [] });
-  const st = getState(writableDb(), sid);
+  const st = await getState(writableDb(), sid);
   if (!st || st.session.stato === "CONCLUSA") return NextResponse.json({ ok: true, data: [] });
   return NextResponse.json({
     ok: true,
-    data: searchAvailable(
+    data: await searchAvailable(
       writableDb(), sid, st.session.dataset,
       u.searchParams.get("q") ?? "", u.searchParams.get("ruolo") ?? "", u.searchParams.get("squadra") ?? ""
     ),

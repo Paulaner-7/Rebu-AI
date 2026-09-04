@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const db = writableDb();
-  const live = db.prepare("SELECT id FROM auction_sessions WHERE stato IN ('LIVE','PAUSA')").get();
+  const live = await db.prepare("SELECT id FROM auction_sessions WHERE stato IN ('LIVE','PAUSA')").get();
   if (live) return NextResponse.json({ ok: false, code: "ASTA_APERTA", message: "Reimport vietato ad asta aperta" }, { status: 409 });
   const out: string = await new Promise((resolve) => {
     // Percorso a runtime (non bundlare: script eseguito come processo separato).

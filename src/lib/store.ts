@@ -2,36 +2,36 @@ import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { ensureDataset } from "./ensure-dataset";
 import { statsGiocatore } from "./stats";
+import { makeDb, type Db } from "./pgdb";
 
 const DB_PATH = join(process.cwd(), ".data", "rebu.db");
 
-let db: DatabaseSync | null = null;
-function conn(): DatabaseSync | null {
+let raw: DatabaseSync | null = null;
+function conn(): Db | null {
   ensureDataset(); // DB auto-pronto aprendo sito (idempotente, throttled)
-  if (db) return db;
   try {
-    db = new DatabaseSync(DB_PATH, { readOnly: true });
-    return db;
+    if (!raw) raw = new DatabaseSync(DB_PATH, { readOnly: true });
+    return makeDb(raw);
   } catch {
     return null; // DB non ancora importato: pagina mostra guida
   }
 }
 
-export function isImported(): boolean {
+export async function isImported(): Promise<boolean> {
   const c = conn();
   if (!c) return false;
   try {
-    return (c.prepare("SELECT COUNT(*) AS n FROM players").get() as { n: number }).n > 0;
+    return (((await c.prepare("SELECT COUNT(*) AS n FROM players").get()) as { n: number }).n ?? 0) > 0;
   } catch {
     return false;
   }
 }
 
-export function getActiveVersion(): string | null {
+export async function getActiveVersion(): Promise<string | null> {
   const c = conn();
   if (!c) return null;
   try {
-    const r = c.prepare("SELECT value FROM settings WHERE key='dataset_attivo'").get() as
+    const r = (await c.prepare("SELECT value FROM settings WHERE key='dataset_attivo'").get()) as
       | { value: string }
       | undefined;
     return r?.value ?? null;
@@ -52,11 +52,11 @@ export type PlayerRow = {
   is_titolare: number;
 };
 
-export function searchPlayers(q: string, ruolo: string, squadra: string): PlayerRow[] {
+export async function searchPlayers(q: string, ruolo: string, squadra: string): Promise<PlayerRow[]> {
   const c = conn();
   if (!c) return [];
   const like = `%${q.toLowerCase()}%`;
-  return c
+  return (await c
     .prepare(
       `SELECT official_id, nome, squadra, ruolo_classic, ruolo_mantra, qt_a, fvm, pma, is_titolare
        FROM players
@@ -65,7 +65,7 @@ export function searchPlayers(q: string, ruolo: string, squadra: string): Player
          AND (? = '' OR squadra = ?)
        ORDER BY qt_a DESC LIMIT 200`
     )
-    .all(like, like, ruolo, ruolo, squadra, squadra) as PlayerRow[];
+    .all(like, like, ruolo, ruolo, squadra, squadra)) as PlayerRow[];
 }
 
 export type DatasetInfo = {
@@ -77,20 +77,20 @@ export type DatasetInfo = {
 };
 
 // Conteggi reali dal DB (auto-importato). Null se DB assente.
-export function getDatasetInfo(): DatasetInfo | null {
+export async function getDatasetInfo(): Promise<DatasetInfo | null> {
   const c = conn();
   if (!c) return null;
   try {
-    const version = getActiveVersion();
+    const version = await getActiveVersion();
     if (!version) return null;
-    const totale = (c.prepare("SELECT COUNT(*) AS n FROM players WHERE dataset_version=?").get(version) as { n: number }).n;
+    const totale = ((await c.prepare("SELECT COUNT(*) AS n FROM players WHERE dataset_version=?").get(version)) as { n: number }).n;
     if (!totale) return null;
     const perRuolo = { P: 0, D: 0, C: 0, A: 0 };
-    for (const r of c.prepare("SELECT ruolo_classic AS ruolo, COUNT(*) AS n FROM players WHERE dataset_version=? GROUP BY ruolo_classic").all(version) as { ruolo: string; n: number }[]) {
+    for (const r of (await c.prepare("SELECT ruolo_classic AS ruolo, COUNT(*) AS n FROM players WHERE dataset_version=? GROUP BY ruolo_classic").all(version)) as { ruolo: string; n: number }[]) {
       if (r.ruolo in perRuolo) perRuolo[r.ruolo as keyof typeof perRuolo] = r.n;
     }
-    const squadre = (c.prepare("SELECT COUNT(DISTINCT squadra) AS n FROM players WHERE dataset_version=?").get(version) as { n: number }).n;
-    const titolari = (c.prepare("SELECT COUNT(*) AS n FROM players WHERE dataset_version=? AND is_titolare=1").get(version) as { n: number }).n;
+    const squadre = ((await c.prepare("SELECT COUNT(DISTINCT squadra) AS n FROM players WHERE dataset_version=?").get(version)) as { n: number }).n;
+    const titolari = ((await c.prepare("SELECT COUNT(*) AS n FROM players WHERE dataset_version=? AND is_titolare=1").get(version)) as { n: number }).n;
     return { version, totale, perRuolo, squadre, titolari };
   } catch {
     return null;
@@ -100,37 +100,37 @@ export function getDatasetInfo(): DatasetInfo | null {
 export type PlayerDetail = {
   player: PlayerRow;
   dataset: string;
-  stats: ReturnType<typeof statsGiocatore>;
+  stats: Awaited<ReturnType<typeof statsGiocatore>>;
 };
 
 // Scheda singolo giocatore + statistiche fuse (stagione live + storico).
 // Ritorna null se DB assente o id fuori dataset: pagina mostra EmptyState.
-export function getPlayerDetail(officialId: number): PlayerDetail | null {
+export async function getPlayerDetail(officialId: number): Promise<PlayerDetail | null> {
   const c = conn();
   if (!c || !Number.isInteger(officialId)) return null;
   try {
-    const version = getActiveVersion();
+    const version = await getActiveVersion();
     if (!version) return null;
-    const p = c
+    const p = (await c
       .prepare(
         `SELECT official_id, nome, squadra, ruolo_classic, ruolo_mantra, qt_a, fvm, pma, is_titolare
          FROM players WHERE dataset_version=? AND official_id=?`
       )
-      .get(version, officialId) as PlayerRow | undefined;
+      .get(version, officialId)) as PlayerRow | undefined;
     if (!p) return null;
-    return { player: p, dataset: version, stats: statsGiocatore(c, version, officialId) };
+    return { player: p, dataset: version, stats: await statsGiocatore(c, version, officialId) };
   } catch {
     return null;
   }
 }
 
-export function getFilterOptions(): { ruoli: string[]; squadre: string[] } {
+export async function getFilterOptions(): Promise<{ ruoli: string[]; squadre: string[] }> {
   const c = conn();
   if (!c) return { ruoli: [], squadre: [] };
-  const ruoli = (c.prepare("SELECT DISTINCT ruolo_classic AS v FROM players ORDER BY v").all() as { v: string }[]).map(
+  const ruoli = ((await c.prepare("SELECT DISTINCT ruolo_classic AS v FROM players ORDER BY v").all()) as { v: string }[]).map(
     (r) => r.v
   );
-  const squadre = (c.prepare("SELECT DISTINCT squadra AS v FROM players ORDER BY v").all() as { v: string }[]).map(
+  const squadre = ((await c.prepare("SELECT DISTINCT squadra AS v FROM players ORDER BY v").all()) as { v: string }[]).map(
     (r) => r.v
   );
   return { ruoli, squadre };

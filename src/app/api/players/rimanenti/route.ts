@@ -15,12 +15,12 @@ export async function GET(req: Request) {
   if (!sid || !["P", "D", "C", "A"].includes(ruolo)) {
     return NextResponse.json({ ok: false, code: "PARAM", message: "sessionId e ruolo P/D/C/A obbligatori" }, { status: 400 });
   }
-  const st = getState(writableDb(), sid);
+  const st = await getState(writableDb(), sid);
   if (!st) return NextResponse.json({ ok: false, code: "ASTA" }, { status: 404 });
   const owner = st.managers.find((m) => m.is_owner === 1) ?? st.managers[0];
   const limit = Math.min(Math.max(Number(u.searchParams.get("limit") ?? 30), 1), 60);
   return NextResponse.json({
     ok: true,
-    data: rimanentiRuolo(writableDb(), sid, owner.id, ruolo, limit),
+    data: await rimanentiRuolo(writableDb(), sid, owner.id, ruolo, limit),
   });
 }

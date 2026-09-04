@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { Db } from "./pgdb";
 import { managerStates, leagueRules } from "./auction";
 
 // Motore prezzi deterministico (tool futuri agente AI).
@@ -15,8 +15,8 @@ export type Row = {
   is_titolare: number;
 };
 
-export function getPlayer(db: DatabaseSync, dataset: string, officialId: number): Row {
-  const p = db.prepare("SELECT * FROM players WHERE dataset_version=? AND official_id=?").get(dataset, officialId) as Row | undefined;
+export async function getPlayer(db: Db, dataset: string, officialId: number): Promise<Row> {
+  const p = await db.prepare("SELECT * FROM players WHERE dataset_version=? AND official_id=?").get(dataset, officialId) as Row | undefined;
   if (!p) throw new Error(`Giocatore ${officialId} fuori dataset`);
   return p;
 }
@@ -28,14 +28,14 @@ function median(ns: (number | null)[]): number | null {
   return v.length % 2 ? v[m] : Math.round((v[m - 1] + v[m]) / 2);
 }
 
-function mediaReparto(db: DatabaseSync, dataset: string, ruolo: string): number {
-  const r = db.prepare("SELECT AVG(qt_a) AS m FROM players WHERE dataset_version=? AND ruolo_classic=?").get(dataset, ruolo) as { m: number | null };
+async function mediaReparto(db: Db, dataset: string, ruolo: string): Promise<number> {
+  const r = await db.prepare("SELECT AVG(qt_a) AS m FROM players WHERE dataset_version=? AND ruolo_classic=?").get(dataset, ruolo) as { m: number | null };
   return Math.round(r.m ?? 1);
 }
 
 // 1. prezzoRiferimento
-export function prezzoRiferimento(db: DatabaseSync, dataset: string, officialId: number) {
-  const p = getPlayer(db, dataset, officialId);
+export async function prezzoRiferimento(db: Db, dataset: string, officialId: number) {
+  const p = await getPlayer(db, dataset, officialId);
   if (p.pma != null) {
     const v = Math.round(p.pma * 500);
     return { valore: v, formula: "PMA × 500", input: { pma: p.pma } };
@@ -47,7 +47,7 @@ export function prezzoRiferimento(db: DatabaseSync, dataset: string, officialId:
   if (med != null) {
     return { valore: med, formula: "mediana(Qt 25/26, 24/25, 23/24, 22/23, Qt.A)", input: { qt_2526: p.qt_2526, qt_2425: p.qt_2425, qt_2324: p.qt_2324, qt_2223: p.qt_2223, qt_a: p.qt_a } };
   }
-  const m = mediaReparto(db, dataset, p.ruolo_classic);
+  const m = await mediaReparto(db, dataset, p.ruolo_classic);
   return { valore: m, formula: "media Qt.A reparto (nessun dato individuale)", input: { ruolo: p.ruolo_classic } };
 }
 
@@ -55,16 +55,17 @@ export function prezzoRiferimento(db: DatabaseSync, dataset: string, officialId:
 // Base = valore mercato (FVM/2, es. Malen 450/2 = 225) corretto per momentum
 // ultime stagioni: crescita Qt spinge prezzo, crollo lo affossa. Clamp 0.7–1.3.
 // Inflazione live applicata dopo (vedi tettoConsigliato.adattato).
-export function prezzoPrevisto(db: DatabaseSync, dataset: string, officialId: number) {
-  const p = getPlayer(db, dataset, officialId);
-  const base = p.fvm != null
-    ? { v: p.fvm / 2, fonte: "FVM / 2 (valore mercato)" }
-    : (() => {
-        const med = median([p.qt_2526, p.qt_2425, p.qt_2324, p.qt_2223, p.qt_a]);
-        return med != null
-          ? { v: med, fonte: "mediana storiche (FVM assente)" }
-          : { v: mediaReparto(db, dataset, p.ruolo_classic), fonte: "media reparto (nessun dato)" };
-      })();
+export async function prezzoPrevisto(db: Db, dataset: string, officialId: number) {
+  const p = await getPlayer(db, dataset, officialId);
+  let base: { v: number; fonte: string };
+  if (p.fvm != null) {
+    base = { v: p.fvm / 2, fonte: "FVM / 2 (valore mercato)" };
+  } else {
+    const med = median([p.qt_2526, p.qt_2425, p.qt_2324, p.qt_2223, p.qt_a]);
+    base = med != null
+      ? { v: med, fonte: "mediana storiche (FVM assente)" }
+      : { v: await mediaReparto(db, dataset, p.ruolo_classic), fonte: "media reparto (nessun dato)" };
+  }
   let kTrend = 1;
   let trend = "storiche insufficienti: neutro";
   if (p.qt_2526 != null && p.qt_2425 != null && p.qt_2425 > 0) {
@@ -80,12 +81,12 @@ export function prezzoPrevisto(db: DatabaseSync, dataset: string, officialId: nu
 }
 
 // 2. tettoRilancio(mio manager, giocatore)
-export function tettoRilancio(db: DatabaseSync, sid: number, managerId: number, officialId: number) {
-  const st = managerStates(db, sid);
+export async function tettoRilancio(db: Db, sid: number, managerId: number, officialId: number) {
+  const st = await managerStates(db, sid);
   const m = st.find((x) => x.id === managerId);
   if (!m) throw new Error("Manager assente");
-  const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
-  const p = getPlayer(db, ds, officialId);
+  const ds = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const p = await getPlayer(db, ds, officialId);
   const slot = m.slot[p.ruolo_classic];
   const okSlot = slot && slot.usati < slot.totali;
   const vuoti = Object.values(m.slot).reduce((a, s) => a + (s.totali - s.usati), 0);
@@ -98,9 +99,9 @@ export function tettoRilancio(db: DatabaseSync, sid: number, managerId: number, 
 }
 
 // 3. inflazioneAsta per reparto: pagato / atteso (riferimento), live
-export function inflazioneAsta(db: DatabaseSync, sid: number) {
-  const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
-  const rows = db.prepare(
+export async function inflazioneAsta(db: Db, sid: number) {
+  const ds = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const rows = await db.prepare(
     `SELECT pl.ruolo_classic AS ruolo, pu.prezzo, pl.fvm FROM purchases pu
      JOIN players pl ON pl.id=pu.player_id WHERE pu.session_id=?`
   ).all(sid) as { ruolo: string; prezzo: number; fvm: number | null }[];
@@ -124,12 +125,12 @@ export function inflazioneAsta(db: DatabaseSync, sid: number) {
   return { reparti: out, totale: at > 0 ? Math.round((pt / at) * 100) / 100 : 1, acquistiValutati: rows.length };
 }
 
-export function tettoConsigliato(db: DatabaseSync, sid: number, managerId: number, officialId: number) {
-  const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
-  const prev = prezzoPrevisto(db, ds, officialId);
-  const tet = tettoRilancio(db, sid, managerId, officialId);
-  const p = getPlayer(db, ds, officialId);
-  const infl = inflazioneAsta(db, sid).reparti[p.ruolo_classic].valore;
+export async function tettoConsigliato(db: Db, sid: number, managerId: number, officialId: number) {
+  const ds = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const prev = await prezzoPrevisto(db, ds, officialId);
+  const tet = await tettoRilancio(db, sid, managerId, officialId);
+  const p = await getPlayer(db, ds, officialId);
+  const infl = (await inflazioneAsta(db, sid)).reparti[p.ruolo_classic].valore;
   const adattato = Math.round(prev.valore * infl);
   return {
     previsto: prev.valore, formulaPrevisto: prev.formula, inflazioneReparto: infl,
@@ -141,20 +142,20 @@ export function tettoConsigliato(db: DatabaseSync, sid: number, managerId: numbe
 
 // 4. prossimeChiamate: ranking deterministico
 // rankAll: base condivisa con rimanentiRuolo (stesso score, stessi motivi).
-function rankAll(db: DatabaseSync, sid: number, managerId: number) {
-  const s = db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string };
-  const { rosa } = leagueRules(db);
-  const ms = managerStates(db, sid);
+async function rankAll(db: Db, sid: number, managerId: number) {
+  const s = await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string };
+  const { rosa } = await leagueRules(db);
+  const ms = await managerStates(db, sid);
   const mine = ms.find((x) => x.id === managerId);
   if (!mine) throw new Error("Manager assente");
-  const mod = (db.prepare("SELECT value FROM settings WHERE key='modificatore_default'").get() as { value: string } | undefined)?.value === "on";
-  const avail = db.prepare(
+  const mod = (await db.prepare("SELECT value FROM settings WHERE key='modificatore_default'").get() as { value: string } | undefined)?.value === "on";
+  const avail = await db.prepare(
     `SELECT p.official_id AS o, p.nome, p.squadra, p.ruolo_classic AS ruolo, p.qt_a AS qt, p.fvm, p.is_titolare AS tit
      FROM players p WHERE p.dataset_version=?
        AND NOT EXISTS (SELECT 1 FROM purchases pu WHERE pu.session_id=? AND pu.player_id=p.id)`
   ).all(s.d, sid) as { o: number; nome: string; squadra: string; ruolo: string; qt: number | null; fvm: number | null; tit: number }[];
   const maxQt: Record<string, number> = {};
-  const pref = db.prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(s.d) as { o: number; tipo: string }[];
+  const pref = await db.prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(s.d) as { o: number; tipo: string }[];
   const prefMap = new Map(pref.map((p) => [p.o, p.tipo]));
   for (const r of avail) maxQt[r.ruolo] = Math.max(maxQt[r.ruolo] ?? 1, r.qt ?? 1);
   const availPer: Record<string, number> = {};
@@ -182,8 +183,8 @@ function rankAll(db: DatabaseSync, sid: number, managerId: number) {
   return { rank, mod: mod ? "on" : "off" };
 }
 
-export function prossimeChiamate(db: DatabaseSync, sid: number, managerId: number, top = 5) {
-  const { rank, mod } = rankAll(db, sid, managerId);
+export async function prossimeChiamate(db: Db, sid: number, managerId: number, top = 5) {
+  const { rank, mod } = await rankAll(db, sid, managerId);
   const top5 = rank.slice(0, top).map((r) => ({
     official_id: r.official_id, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo,
     score: r.score, motivi: r.motivi, formula: r.formula,
@@ -193,19 +194,19 @@ export function prossimeChiamate(db: DatabaseSync, sid: number, managerId: numbe
 
 // 4b. rimanentiRuolo: dopo chiamata di ruolo R, lista ordinata per score con
 // statistiche (Qt, FVM, titolarità) + riferimento e tetto squadra owner.
-export function rimanentiRuolo(db: DatabaseSync, sid: number, managerId: number, ruolo: string, limit = 30) {
-  const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
-  const { rank } = rankAll(db, sid, managerId);
-  return rank
+export async function rimanentiRuolo(db: Db, sid: number, managerId: number, ruolo: string, limit = 30) {
+  const ds = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const { rank } = await rankAll(db, sid, managerId);
+  return await Promise.all(rank
     .filter((r) => r.ruolo === ruolo)
     .slice(0, Math.min(Math.max(limit, 1), 60))
-    .map((r) => ({
+    .map(async (r) => ({
       o: r.official_id, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo,
       qt: r.qt, fvm: r.fvm, titolare: r.tit,
-      rif: prezzoRiferimento(db, ds, r.official_id).valore,
-      tetto: tettoConsigliato(db, sid, managerId, r.official_id).consigliato,
+      rif: (await prezzoRiferimento(db, ds, r.official_id)).valore,
+      tetto: (await tettoConsigliato(db, sid, managerId, r.official_id)).consigliato,
       score: r.score, motivi: r.motivi,
-    }));
+    })));
 }
 
 // 4c. verdettoRialzo: dopo ogni chiamata, Rebu AI dice ad owner se ALZARE,
@@ -216,12 +217,12 @@ export type Verdetto = {
   numeri: { offerta: number; previsto: number; adattato: number; tetto: number };
 };
 
-export function verdettoRialzo(db: DatabaseSync, sid: number, managerId: number, officialId: number, offerta: number): Verdetto {
-  const ds = (db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
-  const p = getPlayer(db, ds, officialId);
-  const t = tettoConsigliato(db, sid, managerId, officialId);
+export async function verdettoRialzo(db: Db, sid: number, managerId: number, officialId: number, offerta: number): Promise<Verdetto> {
+  const ds = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const p = await getPlayer(db, ds, officialId);
+  const t = await tettoConsigliato(db, sid, managerId, officialId);
   const numeri = { offerta, previsto: t.previsto, adattato: t.adattato, tetto: t.tettoMax };
-  const ms = managerStates(db, sid);
+  const ms = await managerStates(db, sid);
   const mine = ms.find((x) => x.id === managerId);
   const slotLiberi = mine ? mine.slot[p.ruolo_classic].totali - mine.slot[p.ruolo_classic].usati : 0;
   if (slotLiberi <= 0) {
@@ -234,7 +235,7 @@ export function verdettoRialzo(db: DatabaseSync, sid: number, managerId: number,
     const margine = t.adattato - offerta;
     return { verdetto: "ALZA", titolo: "Alza: sotto prezzo previsto", dettaglio: `Chiude intorno a ${t.previsto} (adattato ${t.adattato}), ora a ${offerta}: margine ${margine}. Rilancia fino a ${Math.min(t.adattato, t.tettoMax)}.`, numeri };
   }
-  const pref = db.prepare("SELECT tipo FROM preferenze WHERE dataset_version=? AND official_id=?").get(ds, officialId) as { tipo: string } | undefined;
+  const pref = await db.prepare("SELECT tipo FROM preferenze WHERE dataset_version=? AND official_id=?").get(ds, officialId) as { tipo: string } | undefined;
   const extra = p.is_titolare ? " È titolare XI." : "";
   const pupillo = pref?.tipo === "W" ? " È tuo pupillo." : "";
   // TENTENNA = range fisso 10 crediti oltre consigliato. Oltre → STOP (MOLLA).
@@ -254,8 +255,8 @@ export function verdettoRialzo(db: DatabaseSync, sid: number, managerId: number,
 }
 
 // 5. matriceLega: residui + buchi per ruolo + max spesa
-export function matriceLega(db: DatabaseSync, sid: number) {
-  const ms = managerStates(db, sid);
+export async function matriceLega(db: Db, sid: number) {
+  const ms = await managerStates(db, sid);
   return {
     formula: "residui = 500 − speso; buchi = totali − usati; maxSpesa = residui − (vuoti − 1)",
     righe: ms.map((m) => ({

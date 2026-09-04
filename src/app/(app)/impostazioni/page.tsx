@@ -4,8 +4,8 @@ import SettingsForm from "./settings-form";
 
 export const dynamic = "force-dynamic";
 
-export default function Page() {
-  const { state } = publicState();
+export default async function Page() {
+  const { state } = (await publicState());
   const stato = state?.session.stato ?? "";
   const editable = stato === "" || stato === "PRONTA";
   const astaAperta = stato === "LIVE" || stato === "PAUSA";

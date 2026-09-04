@@ -17,7 +17,7 @@ export default async function Home() {
   const db = getDbStatus();
   const env = getEnvChecklist();
   const m = DATASET_META;
-  const info = isSupabaseConfigured() ? await getDatasetInfoSb().catch(() => null) : getDatasetInfo();
+  const info = isSupabaseConfigured() ? await getDatasetInfoSb().catch(() => null) : await getDatasetInfo();
 
   return (
     <main className="flex flex-col gap-6">

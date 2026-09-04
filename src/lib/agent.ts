@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import type { Db } from "./pgdb";
 import { writableDb, latestSessionId } from "./auction-store";
 import { getState, managerStates } from "./auction";
 import { prezzoRiferimento, prezzoPrevisto, tettoConsigliato, prossimeChiamate, matriceLega } from "./pricing";
@@ -40,11 +40,11 @@ export function validateContract(o: unknown): Contract | null {
 }
 
 // --- Tool SOLO lettura ---
-function toolCtx() {
+async function toolCtx() {
   const db = writableDb();
-  const sid = latestSessionId();
+  const sid = await latestSessionId();
   if (!sid) throw new Error("Nessuna asta");
-  const st = getState(db, sid);
+  const st = await getState(db, sid);
   return { db, sid, dataset: st.session.dataset, versione: st.session.versione };
 }
 
@@ -64,40 +64,40 @@ export const TOOL_DEFS = [
   { type: "function", function: { name: "verificaGiocatori", description: "Verifica nomi contro rosa Serie A 2026/27: ritorna trovati (con FM/gol 26/27) e ignoti da scartare. Usala prima di citare alternative.", parameters: { type: "object", properties: { nomi: { type: "array", items: { type: "string" } } }, required: ["nomi"] } } },
 ] as const;
 
-export function execTool(db: DatabaseSync, sid: number, dataset: string, name: string, args: Record<string, unknown>): unknown {
+export async function execTool(db: Db, sid: number, dataset: string, name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
     case "cercaGiocatori":
-      return searchAvailable(db, sid, dataset, String(args.q ?? ""), String(args.ruolo ?? ""), String(args.squadra ?? ""));
+      return await searchAvailable(db, sid, dataset, String(args.q ?? ""), String(args.ruolo ?? ""), String(args.squadra ?? ""));
     case "profiloGiocatore": {
-      const p = db.prepare("SELECT * FROM players WHERE dataset_version=? AND official_id=?").get(dataset, Number(args.officialId));
+      const p = await db.prepare("SELECT * FROM players WHERE dataset_version=? AND official_id=?").get(dataset, Number(args.officialId));
       if (!p) return { errore: "assente" };
       const r = p as Record<string, unknown>;
-      const pref = db.prepare("SELECT tipo FROM preferenze WHERE dataset_version=? AND official_id=?").get(dataset, Number(args.officialId)) as { tipo: string } | undefined;
-      return { ...r, riferimento: prezzoRiferimento(db, dataset, Number(args.officialId)), preferenza: pref?.tipo ?? null };
+      const pref = await db.prepare("SELECT tipo FROM preferenze WHERE dataset_version=? AND official_id=?").get(dataset, Number(args.officialId)) as { tipo: string } | undefined;
+      return { ...r, riferimento: await prezzoRiferimento(db, dataset, Number(args.officialId)), preferenza: pref?.tipo ?? null };
     }
-    case "statoAsta": return getState(db, sid).session;
-    case "statoSquadra": return managerStates(db, sid).find((m) => m.id === Number(args.managerId)) ?? { errore: "assente" };
-    case "matriceLega": return matriceLega(db, sid);
-    case "tettoRilancio": return tettoConsigliato(db, sid, Number(args.managerId), Number(args.officialId));
-    case "prezzoRiferimento": return prezzoRiferimento(db, dataset, Number(args.officialId));
-    case "prezzoPrevisto": return prezzoPrevisto(db, dataset, Number(args.officialId));
-    case "prossimeChiamate": return prossimeChiamate(db, sid, Number(args.managerId), Number(args.top ?? 5));
-    case "consultaStrategia": return kbCerca(String(args.argomento ?? ""), 3);
-    case "statsGiocatore": return statsGiocatore(db, dataset, Number(args.officialId));
-    case "classificaStats": return classificaStats(db, String(args.metrica), String(args.ruolo ?? ""), String(args.stagione ?? ""), Number(args.top ?? 10));
+    case "statoAsta": return (await getState(db, sid)).session;
+    case "statoSquadra": return (await managerStates(db, sid)).find((m) => m.id === Number(args.managerId)) ?? { errore: "assente" };
+    case "matriceLega": return await matriceLega(db, sid);
+    case "tettoRilancio": return await tettoConsigliato(db, sid, Number(args.managerId), Number(args.officialId));
+    case "prezzoRiferimento": return await prezzoRiferimento(db, dataset, Number(args.officialId));
+    case "prezzoPrevisto": return await prezzoPrevisto(db, dataset, Number(args.officialId));
+    case "prossimeChiamate": return await prossimeChiamate(db, sid, Number(args.managerId), Number(args.top ?? 5));
+    case "consultaStrategia": return await kbCerca(String(args.argomento ?? ""), 3);
+    case "statsGiocatore": return await statsGiocatore(db, dataset, Number(args.officialId));
+    case "classificaStats": return await classificaStats(db, String(args.metrica), String(args.ruolo ?? ""), String(args.stagione ?? ""), Number(args.top ?? 10));
     case "verificaGiocatori": {
       const nomi = Array.isArray(args.nomi) ? (args.nomi as unknown[]).map(String).slice(0, 20) : [String(args.nomi ?? "")];
-      const v = verificaNomi(db, dataset, nomi);
+      const v = await verificaNomi(db, dataset, nomi);
       return {
-        trovati: v.trovati.map((t) => {
+        trovati: await Promise.all(v.trovati.map(async (t) => {
           let live: Record<string, unknown> | null = null;
           try {
-            const s = statsGiocatore(db, dataset, t.official_id);
+            const s = await statsGiocatore(db, dataset, t.official_id);
             const stag = (s.stagioni.filter(Boolean) as Record<string, unknown>[]).find((x) => x.stagione === "2026-27") ?? null;
             if (stag) live = { fantamedia: stag.fantamedia ?? null, gol: stag.gol ?? null, xg: stag.xg ?? null, presenze: stag.presenze ?? null };
           } catch { /* stats assenti: riga resta valida */ }
           return { ...t, live_2627: live };
-        }),
+        })),
         ignoti: v.ignoti,
       };
     }
@@ -107,19 +107,19 @@ export function execTool(db: DatabaseSync, sid: number, dataset: string, name: s
 
 // Contesto live verificato nel system prompt: chiamato 26/27 con numeri,
 // segnale stats e papabili disponibili. Vuoto se niente asta (chat libera).
-export function contestoLive(db: DatabaseSync, sid: number, dataset: string): string {
+export async function contestoLive(db: Db, sid: number, dataset: string): Promise<string> {
   try {
-    const st = getState(db, sid);
+    const st = await getState(db, sid);
     const owner = st.managers.find((m) => m.is_owner === 1) ?? st.managers[0];
     if (!st.nomination || !owner) return "";
-    const p = db.prepare(
+    const p = await db.prepare(
       "SELECT nome, squadra, ruolo_classic, qt_a FROM players WHERE dataset_version=? AND official_id=?"
     ).get(dataset, st.nomination.o) as { nome: string; squadra: string; ruolo_classic: string; qt_a: number | null } | undefined;
     if (!p) return "";
-    const prev = prezzoPrevisto(db, dataset, st.nomination.o);
+    const prev = await prezzoPrevisto(db, dataset, st.nomination.o);
     let statsTxt = "stats 26/27 assenti";
     try {
-      const s = statsGiocatore(db, dataset, st.nomination.o);
+      const s = await statsGiocatore(db, dataset, st.nomination.o);
       const sin = s.sintesi as unknown as { fantamedia_media: number | null; scarto_gol_meno_xg: number };
       const live = (s.stagioni.filter(Boolean) as Record<string, unknown>[]).find((x) => x.stagione === "2026-27");
       const fmLive = live && typeof live.fantamedia === "number" ? live.fantamedia : null;
@@ -127,11 +127,11 @@ export function contestoLive(db: DatabaseSync, sid: number, dataset: string): st
     } catch { /* tabelle stats vuote */ }
     let papabili = "";
     try {
-      papabili = filtraAlternativeValide(db, dataset, prossimeChiamate(db, sid, owner.id, 3).top.map((r) => r.nome)).join(", ");
+      papabili = (await filtraAlternativeValide(db, dataset, (await prossimeChiamate(db, sid, owner.id, 3)).top.map((r) => r.nome))).join(", ");
     } catch { /* ranking assente */ }
     let disp = "?";
     try {
-      disp = String((db.prepare(
+      disp = String((await db.prepare(
         "SELECT COUNT(*) AS n FROM players p WHERE p.dataset_version=? AND NOT EXISTS (SELECT 1 FROM purchases pu WHERE pu.session_id=? AND pu.player_id=p.id)"
       ).get(dataset, sid) as { n: number }).n);
     } catch { /* conteggio assente */ }
@@ -142,26 +142,26 @@ export function contestoLive(db: DatabaseSync, sid: number, dataset: string): st
 }
 
 // Fallback deterministico quando AI non configurata / errore
-export function fallbackAnswer(db: DatabaseSync, sid: number, dataset: string, versione: number, domanda: string) {
-  const st = getState(db, sid);
+export async function fallbackAnswer(db: Db, sid: number, dataset: string, versione: number, domanda: string) {
+  const st = await getState(db, sid);
   const owner = st.managers.find((m) => m.is_owner === 1) ?? st.managers[0];
   if (!st.nomination || !owner) {
     return { testo: "Nomina un giocatore in pagina Asta e richiederò sul chiamato.", contract: null as Contract | null, fonti: ["statoAsta"] };
   }
-  const t = tettoConsigliato(db, sid, owner.id, st.nomination.o);
+  const t = await tettoConsigliato(db, sid, owner.id, st.nomination.o);
   // Alternative = papabili reali disponibili (mai nomi inventati).
   let alternative: string[] = [];
   try {
-    alternative = filtraAlternativeValide(
+    alternative = (await filtraAlternativeValide(
       db, dataset,
-      prossimeChiamate(db, sid, owner.id, 3).top.map((r) => r.nome)
-    ).slice(0, 3);
+      (await prossimeChiamate(db, sid, owner.id, 3)).top.map((r) => r.nome)
+    )).slice(0, 3);
   } catch { /* ranking assente: nessuna alternativa */ }
   // Segnale stats 26/27 + storico (degrada a null se tabelle vuote).
   let segnale = "";
   const fonti = ["prezzoPrevisto", "tettoRilancio"];
   try {
-    const s = statsGiocatore(db, dataset, st.nomination.o);
+    const s = await statsGiocatore(db, dataset, st.nomination.o);
     const sin = s.sintesi as unknown as { fantamedia_media: number | null; scarto_gol_meno_xg: number };
     const live = (s.stagioni.filter(Boolean) as Record<string, unknown>[]).find((x) => x.stagione === "2026-27");
     const fmLive = live && typeof live.fantamedia === "number" ? `, FM 26/27 ${live.fantamedia}` : "";
@@ -182,20 +182,20 @@ export function fallbackAnswer(db: DatabaseSync, sid: number, dataset: string, v
 
 export async function runChat(domanda: string, model?: string) {
   const t0 = Date.now();
-  const { db, sid, dataset, versione } = toolCtx();
+  const { db, sid, dataset, versione } = await toolCtx();
   const key = process.env.OPENCODE_API_KEY ?? "";
-  const modSetting = db.prepare("SELECT value FROM settings WHERE key='modificatore_difesa'").get() as { value: string } | undefined;
+  const modSetting = await db.prepare("SELECT value FROM settings WHERE key='modificatore_difesa'").get() as { value: string } | undefined;
   const sysPrompt = SYSTEM_PROMPT
-    + kbDigest(900)   // principi KB in ~20 righe; dettagli via tool consultaStrategia
+    + (await kbDigest(900))   // principi KB in ~20 righe; dettagli via tool consultaStrategia
     + "\nPer tattiche d'asta usa consultaStrategia e cita gli ID KB in fonti. Per numeri su performance passate usa statsGiocatore/classificaStats."
-    + contestoLive(db, sid, dataset)
+    + (await contestoLive(db, sid, dataset))
     + (modSetting?.value === "off" ? "\nModificatore difesa SPENTO in questa lega: non citarlo e non privilegiare difensori/portieri." : "");
-  const mdl = model || (db.prepare("SELECT value FROM settings WHERE key='modello_default'").get() as { value: string } | undefined)?.value || DEFAULT_MODEL;
+  const mdl = model || (await db.prepare("SELECT value FROM settings WHERE key='modello_default'").get() as { value: string } | undefined)?.value || DEFAULT_MODEL;
   const usati: string[] = [];
 
   if (!key) {
-    const f = fallbackAnswer(db, sid, dataset, versione, domanda);
-    logRun(db, sid, domanda, f.fonti, f.testo, mdl, Date.now() - t0, versione);
+    const f = await fallbackAnswer(db, sid, dataset, versione, domanda);
+    await logRun(db, sid, domanda, f.fonti, f.testo, mdl, Date.now() - t0, versione);
     return { testo: f.testo, contract: f.contract, model: mdl, via: "motore", versione };
   }
 
@@ -221,7 +221,7 @@ export async function runChat(domanda: string, model?: string) {
     for (const c of calls) {
       usati.push(c.function.name);
       let out: unknown;
-      try { out = execTool(db, sid, dataset, c.function.name, JSON.parse(c.function.arguments || "{}")); }
+      try { out = await execTool(db, sid, dataset, c.function.name, JSON.parse(c.function.arguments || "{}")); }
       catch (e) { out = { errore: e instanceof Error ? e.message : "errore" }; }
       messages.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify(out).slice(0, 4000) });
     }
@@ -242,7 +242,7 @@ export async function runChat(domanda: string, model?: string) {
   let contract = extractContract(testo);
   if (contract?.alternative?.length) {
     try {
-      const valide = filtraAlternativeValide(db, dataset, contract.alternative);
+      const valide = await filtraAlternativeValide(db, dataset, contract.alternative);
       if (valide.length !== contract.alternative.length) {
         contract = { ...contract, alternative: valide, fonti: [...new Set([...contract.fonti, "verificaDataset"])] };
         usati.push("verificaDataset");
@@ -251,7 +251,7 @@ export async function runChat(domanda: string, model?: string) {
   }
   // Blocco JSON resta in scheda contratto: via dal testo leggibile.
   testo = testo.replace(/```json[\s\S]*?```/, "").replace(/\{[\s\S]*"azione"[\s\S]*\}/, "").replace(/\n{3,}/g, "\n\n").trim();
-  logRun(db, sid, domanda, usati, testo, mdl, Date.now() - t0, versione);
+  await logRun(db, sid, domanda, usati, testo, mdl, Date.now() - t0, versione);
   return { testo, contract, model: mdl, via: "ai", versione };
 }
 
@@ -261,8 +261,8 @@ export function extractContract(testo: string): Contract | null {
   try { return validateContract(JSON.parse(m[1] ?? m[0])); } catch { return null; }
 }
 
-function logRun(db: DatabaseSync, sid: number, domanda: string, tool: string[], risposta: string, modello: string, lat: number, ver: number) {
-  db.prepare("INSERT INTO agent_runs (session_id, domanda, tool_calls, output, state_version, latenza_ms) VALUES (?,?,?,?,?,?)")
+async function logRun(db: Db, sid: number, domanda: string, tool: string[], risposta: string, modello: string, lat: number, ver: number) {
+  await db.prepare("INSERT INTO agent_runs (session_id, domanda, tool_calls, output, state_version, latenza_ms) VALUES (?,?,?,?,?,?)")
     .run(sid, domanda, JSON.stringify(tool), JSON.stringify({ risposta: risposta.slice(0, 2000), modello }), ver, lat);
 }
 

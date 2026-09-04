@@ -2,7 +2,7 @@
 // La chat suggeriva alternative non in Serie A: ora ogni nome in uscita
 // viene verificato contro players@dataset_attivo. Stagioni passate = spunto,
 // mai verdetto: il presente 26/27 comanda (v. SYSTEM_PROMPT).
-import type { DatabaseSync } from "node:sqlite";
+import type { Db } from "./pgdb";
 
 export function normalizzaNome(s: string): string {
   return String(s ?? "")
@@ -24,9 +24,9 @@ export type VerificaRiga = {
 
 // Ogni nome -> riga dataset (match esatto nome_norm, fallback contains).
 // Ritorna trovati + ignoti: gli ignoti vanno scartati, mai suggeriti.
-export function verificaNomi(
-  db: DatabaseSync, dataset: string, nomi: string[]
-): { trovati: VerificaRiga[]; ignoti: string[] } {
+export async function verificaNomi(
+  db: Db, dataset: string, nomi: string[]
+): Promise<{ trovati: VerificaRiga[]; ignoti: string[] }> {
   const trovati: VerificaRiga[] = [];
   const ignoti: string[] = [];
   const qEsatto = db.prepare(
@@ -40,9 +40,9 @@ export function verificaNomi(
     if (!input) continue;
     const n = normalizzaNome(input);
     if (!n) { ignoti.push(input); continue; }
-    const e = qEsatto.get(dataset, n) as Omit<VerificaRiga, "input"> | undefined;
+    const e = (await qEsatto.get(dataset, n)) as Omit<VerificaRiga, "input"> | undefined;
     if (e) { trovati.push({ input, ...e }); continue; }
-    const c = (qContains.all(dataset, `%${n}%`) as Omit<VerificaRiga, "input">[]);
+    const c = (await qContains.all(dataset, `%${n}%`)) as Omit<VerificaRiga, "input">[];
     if (c.length === 1 && c[0]) trovati.push({ input, ...c[0] });
     else ignoti.push(input);
   }
@@ -50,7 +50,7 @@ export function verificaNomi(
 }
 
 // Filtra alternative AI ai soli nomi canonici in dataset. Droppa il resto.
-export function filtraAlternativeValide(db: DatabaseSync, dataset: string, alt: string[]): string[] {
+export async function filtraAlternativeValide(db: Db, dataset: string, alt: string[]): Promise<string[]> {
   if (!alt?.length) return [];
-  return verificaNomi(db, dataset, alt).trovati.map((t) => t.nome);
+  return (await verificaNomi(db, dataset, alt)).trovati.map((t) => t.nome);
 }

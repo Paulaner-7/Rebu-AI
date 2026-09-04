@@ -14,15 +14,15 @@ export default async function Page({
 }) {
   const { q = "", ruolo = "", squadra = "" } = await searchParams;
   const useSb = useSupabase();
-  const imported = useSb ? await isImportedSb() : isImported();
-  const { ruoli, squadre } = useSb ? await getFilterOptionsSb() : getFilterOptions();
-  const rows = imported ? (useSb ? await searchPlayersSb(q, ruolo, squadra) : searchPlayers(q, ruolo, squadra)) : [];
+  const imported = useSb ? await isImportedSb() : await isImported();
+  const { ruoli, squadre } = useSb ? await getFilterOptionsSb() : await getFilterOptions();
+  const rows = imported ? (useSb ? await searchPlayersSb(q, ruolo, squadra) : await searchPlayers(q, ruolo, squadra)) : [];
   let pref = new Map<number, string>();
   try {
-    const sid = latestSessionId();
+    const sid = await latestSessionId();
     if (sid) {
-      const ds = getState(writableDb(), sid).session.dataset;
-      const pr = writableDb().prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(ds) as { o: number; tipo: string }[];
+      const ds = (await getState(writableDb(), sid)).session.dataset;
+      const pr = (await writableDb().prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(ds)) as { o: number; tipo: string }[];
       pref = new Map(pr.map((r) => [r.o, r.tipo]));
     }
   } catch { /* db senza preferenze yet */ }

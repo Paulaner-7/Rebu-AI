@@ -5,6 +5,7 @@ import { getState } from "@/lib/auction";
 import { rimanentiRuolo } from "@/lib/pricing";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 // Rimanenti di un ruolo dopo chiamata: ranking + stats + rif/tetto owner.
 export async function GET(req: Request) {

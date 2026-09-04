@@ -1,6 +1,7 @@
 // Lettura dataset + statistiche da Supabase (produzione/Vercel).
 // Solo server (service key). Mirror async di lib/store.ts: stesse forme,
 // stessi numeri (fondiStagioni condiviso). Locale resta su SQLite.
+import { cache } from "react";
 import { getSupabaseServer } from "./db";
 import { isSupabaseConfigured } from "./env";
 import { fondiStagioni, normSquadra, stessoGiocatore, type StatInputRow } from "./stats";
@@ -15,10 +16,10 @@ function sb() {
   return c;
 }
 
-export async function getActiveVersionSb(): Promise<string | null> {
+export const getActiveVersionSb = cache(async (): Promise<string | null> => {
   const { data } = await sb().from("settings").select("value").eq("key", "dataset_attivo").maybeSingle();
   return (data?.value as string) ?? null;
-}
+});
 
 export async function isImportedSb(): Promise<boolean> {
   const v = await getActiveVersionSb();
@@ -45,10 +46,20 @@ function toRow(p: SbPlayer): PlayerRow {
   };
 }
 
-async function allPlayers(version: string): Promise<PlayerRow[]> {
+const allPlayersCached = cache(async (version: string): Promise<PlayerRow[]> => {
   const { data, error } = await sb().from("players").select(PLAYER_COLS).eq("dataset_version", version);
   if (error) throw new Error(`players: ${error.message}`);
   return ((data ?? []) as SbPlayer[]).map(toRow);
+});
+
+async function allPlayers(version: string): Promise<PlayerRow[]> {
+  return allPlayersCached(version);
+}
+
+// Dataset della sessione (leggero: niente getState completo).
+export async function getSessionDatasetSb(sid: number): Promise<string | null> {
+  const { data } = await sb().from("auction_sessions").select("dataset_version").eq("id", sid).maybeSingle();
+  return (data?.dataset_version as string) ?? null;
 }
 
 export async function searchPlayersSb(q: string, ruolo: string, squadra: string): Promise<PlayerRow[]> {

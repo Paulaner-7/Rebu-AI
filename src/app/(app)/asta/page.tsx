@@ -8,6 +8,7 @@ import AiDock from "./ai-dock";
 import TeamsRail from "./teams-rail";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const plain = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
@@ -27,25 +28,29 @@ export default async function Page() {
   }
   const db = writableDb();
   const owner = state.managers.find((m) => m.is_owner === 1) ?? state.managers[0];
-  const infl = await inflazioneAsta(db, sid);
-  const next = owner ? await prossimeChiamate(db, sid, owner.id, 3) : null;
-  const consiglio = state.nomination && owner ? {
-    rif: await prezzoRiferimento(db, state.session.dataset, state.nomination.o),
-    tetto: await tettoConsigliato(db, sid, owner.id, state.nomination.o),
-  } : null;
-  const verdetto = state.nomination && owner && state.ultimaChiamata
-    ? await verdettoRialzo(db, sid, owner.id, state.nomination.o, state.ultimaChiamata.prezzo)
-    : null;
-  const topPagati = (await db.prepare(
-    `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo
-     FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
-     WHERE pu.session_id=? ORDER BY pu.prezzo DESC LIMIT 10`
-  ).all(sid)) as { nome: string; squadra: string; chi: string; prezzo: number }[];
-  const affari = (await db.prepare(
-    `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo, CAST(pl.fvm/2.0 AS INT) AS rif
-     FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
-     WHERE pu.session_id=? AND pl.fvm IS NOT NULL ORDER BY (pl.fvm/2.0 - pu.prezzo) DESC LIMIT 10`
-  ).all(sid)) as { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
+  const nom = state.nomination;
+  const [infl, next, rif, tetto, verdetto, topPagatiRows, affariRows] = await Promise.all([
+    inflazioneAsta(db, sid),
+    owner ? prossimeChiamate(db, sid, owner.id, 3) : Promise.resolve(null),
+    nom ? prezzoRiferimento(db, state.session.dataset, nom.o) : Promise.resolve(null),
+    nom && owner ? tettoConsigliato(db, sid, owner.id, nom.o) : Promise.resolve(null),
+    nom && owner && state.ultimaChiamata
+      ? verdettoRialzo(db, sid, owner.id, nom.o, state.ultimaChiamata.prezzo)
+      : Promise.resolve(null),
+    db.prepare(
+      `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo
+       FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
+       WHERE pu.session_id=? ORDER BY pu.prezzo DESC LIMIT 10`
+    ).all(sid),
+    db.prepare(
+      `SELECT pl.nome, pl.squadra, m.nome AS chi, pu.prezzo AS prezzo, CAST(pl.fvm/2.0 AS INT) AS rif
+       FROM purchases pu JOIN players pl ON pl.id=pu.player_id JOIN managers m ON m.id=pu.manager_id
+       WHERE pu.session_id=? AND pl.fvm IS NOT NULL ORDER BY (pl.fvm/2.0 - pu.prezzo) DESC LIMIT 10`
+    ).all(sid),
+  ]);
+  const consiglio = rif && tetto ? { rif, tetto } : null;
+  const topPagati = topPagatiRows as { nome: string; squadra: string; chi: string; prezzo: number }[];
+  const affari = affariRows as { nome: string; squadra: string; chi: string; prezzo: number; rif: number }[];
 
   return (
     <div className="flex flex-col gap-3">

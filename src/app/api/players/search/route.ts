@@ -4,6 +4,8 @@ import { requireAuth } from "@/lib/api-auth";
 import { getState } from "@/lib/auction";
 import { searchAvailable } from "@/lib/catalog";
 
+export const maxDuration = 60;
+
 export async function GET(req: Request) {
   if (await requireAuth(req)) return NextResponse.json({ ok: false, code: "AUTH" }, { status: 401 });
   const u = new URL(req.url);

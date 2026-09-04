@@ -156,13 +156,20 @@ export async function managerStates(db: Db, sid: number): Promise<ManagerState[]
   const mans = (await db.prepare("SELECT * FROM managers ORDER BY id").all()) as {
     id: number; nome: string; nome_squadra: string; is_owner: number; crediti_iniziali: number;
   }[];
+  const allRows = (await db.prepare(
+    `SELECT pu.manager_id AS mid, pl.nome, pl.squadra, pl.ruolo_classic AS ruolo, pu.prezzo
+     FROM purchases pu JOIN players pl ON pl.id = pu.player_id
+     WHERE pu.session_id=? ORDER BY pu.id`
+  ).all(sid)) as { mid: number; nome: string; squadra: string; ruolo: string; prezzo: number }[];
+  const byManager = new Map<number, typeof allRows>();
+  for (const r of allRows) {
+    const g = byManager.get(r.mid) ?? [];
+    g.push(r);
+    byManager.set(r.mid, g);
+  }
   const out: ManagerState[] = [];
   for (const m of mans) {
-    const rows = (await db.prepare(
-      `SELECT pl.nome, pl.squadra, pl.ruolo_classic AS ruolo, pu.prezzo
-       FROM purchases pu JOIN players pl ON pl.id = pu.player_id
-       WHERE pu.session_id=? AND pu.manager_id=? ORDER BY pu.id`
-    ).all(sid, m.id)) as { nome: string; squadra: string; ruolo: string; prezzo: number }[];
+    const rows = (byManager.get(m.id) ?? []).map(({ nome, squadra, ruolo, prezzo }) => ({ nome, squadra, ruolo, prezzo }));
     const speso = rows.reduce((a, r) => a + r.prezzo, 0);
     const slot: ManagerState["slot"] = {};
     for (const [ruolo, totali] of Object.entries(rosa)) {
@@ -185,6 +192,10 @@ export async function ruoloCorrente(db: Db, sid: number): Promise<string | null>
   const ord = (await db.prepare("SELECT value FROM settings WHERE key='ordine_reparti'").get()) as { value: string } | undefined;
   const ruoli = (ord?.value ?? "P,D,C,A").split(",").map((r) => r.trim()).filter(Boolean);
   const ms = await managerStates(db, sid);
+  return ruoloDaManagers(ruoli, ms);
+}
+
+function ruoloDaManagers(ruoli: string[], ms: ManagerState[]): string | null {
   for (const r of ruoli) {
     if (ms.some((m) => (m.slot[r]?.usati ?? 0) < (m.slot[r]?.totali ?? 0))) return r;
   }
@@ -210,19 +221,26 @@ export async function getState(db: Db, sid: number) {
     if (nd) chiamatoDa = (await db.prepare("SELECT id, nome FROM managers WHERE id=?").get(nd)) as { id: number; nome: string } | null;
   }
   if (nomination && chiamatoDa) (nomination as { chiamatoDa?: unknown }).chiamatoDa = chiamatoDa;
-  const unsold = (
-    (await db.prepare(
+  const ordRow = (await db.prepare("SELECT value FROM settings WHERE key='ordine_reparti'").get()) as { value: string } | undefined;
+  const ruoliOrd = (ordRow?.value ?? "P,D,C,A").split(",").map((r) => r.trim()).filter(Boolean);
+  const [unsoldRows, eventsRow, boughtRow, managers, lastCall, nextCaller] = await Promise.all([
+    db.prepare(
       "SELECT payload FROM auction_events WHERE session_id=? AND tipo='UNSOLD' ORDER BY seq DESC LIMIT 20"
-    ).all(sid)) as { payload: string }[]
-  ).map((r) => JSON.parse(r.payload));
-  const events = ((await db.prepare("SELECT COUNT(*) AS n FROM auction_events WHERE session_id=?").get(sid)) as { n: number }).n;
-  const bought = ((await db.prepare("SELECT COUNT(*) AS n FROM purchases WHERE session_id=?").get(sid)) as { n: number }).n;
+    ).all(sid),
+    db.prepare("SELECT COUNT(*) AS n FROM auction_events WHERE session_id=?").get(sid),
+    db.prepare("SELECT COUNT(*) AS n FROM purchases WHERE session_id=?").get(sid),
+    managerStates(db, sid),
+    ultimaChiamata(db, sid),
+    nomination ? Promise.resolve(null) : turnoChiamata(db, sid),
+  ]);
+  const ruolo = ruoloDaManagers(ruoliOrd, managers);
+  const unsold = (unsoldRows as { payload: string }[]).map((r) => JSON.parse(r.payload));
+  const events = (eventsRow as { n: number }).n;
+  const bought = (boughtRow as { n: number }).n;
   return {
     session: { id: s.id, stato: s.stato, dataset: s.dataset_version, versione: s.state_version },
-    managers: await managerStates(db, sid),
-    nomination, ultimaChiamata: await ultimaChiamata(db, sid),
-    prossimoChiamante: nomination ? null : await turnoChiamata(db, sid),
-    ruoloCorrente: await ruoloCorrente(db, sid),
+    managers, nomination, ultimaChiamata: lastCall,
+    prossimoChiamante: nextCaller, ruoloCorrente: ruolo,
     unsoldUltimi: unsold, eventi: events, acquisti: bought,
   };
 }

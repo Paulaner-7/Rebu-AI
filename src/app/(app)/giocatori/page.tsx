@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { searchPlayers, getFilterOptions, isImported, getActiveVersion } from "@/lib/store";
-import { searchPlayersSb, getFilterOptionsSb, isImportedSb, getActiveVersionSb, useSupabase } from "@/lib/store-sb";
+import { searchPlayersSb, getFilterOptionsSb, isImportedSb, getActiveVersionSb, getSessionDatasetSb, useSupabase } from "@/lib/store-sb";
 import { writableDb, latestSessionId } from "@/lib/auction-store";
-import { getState } from "@/lib/auction";
 import { Eyebrow, Panel, RoleBadge, XIChip, btnPrimary } from "@/components/ui";
 import Star from "./star";
+
+export const maxDuration = 60;
 
 export default async function Page({
   searchParams,
@@ -15,15 +16,21 @@ export default async function Page({
   const { q = "", ruolo = "", squadra = "" } = await searchParams;
   const useSb = useSupabase();
   const imported = useSb ? await isImportedSb() : await isImported();
-  const { ruoli, squadre } = useSb ? await getFilterOptionsSb() : await getFilterOptions();
-  const rows = imported ? (useSb ? await searchPlayersSb(q, ruolo, squadra) : await searchPlayers(q, ruolo, squadra)) : [];
+  const [{ ruoli, squadre }, rows] = await Promise.all([
+    useSb ? getFilterOptionsSb() : getFilterOptions(),
+    imported ? (useSb ? searchPlayersSb(q, ruolo, squadra) : searchPlayers(q, ruolo, squadra)) : Promise.resolve([]),
+  ]);
   let pref = new Map<number, string>();
   try {
     const sid = await latestSessionId();
     if (sid) {
-      const ds = (await getState(writableDb(), sid)).session.dataset;
-      const pr = (await writableDb().prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(ds)) as { o: number; tipo: string }[];
-      pref = new Map(pr.map((r) => [r.o, r.tipo]));
+      const ds = useSb ? await getSessionDatasetSb(sid) : (
+        (await writableDb().prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid)) as { d: string } | undefined
+      )?.d ?? null;
+      if (ds) {
+        const pr = (await writableDb().prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(ds)) as { o: number; tipo: string }[];
+        pref = new Map(pr.map((r) => [r.o, r.tipo]));
+      }
     }
   } catch { /* db senza preferenze yet */ }
 

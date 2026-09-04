@@ -111,7 +111,7 @@ export function statsGiocatore(db: DatabaseSync, dataset: string, officialId: nu
     }
     perStagione.set(r.stagione, s);
   }
-  const stagioni = ORDINE_STAGIONI.filter((st) => perStagione.has(st)).map((st) => perStagione.get(st));
+  const stagioni = ORDINE_STAGIONI.filter((st) => perStagione.has(st)).map((st) => perStagione.get(st)!);
 
   // Sintesi multi-anno per il modello: totali e segnali xG vs gol.
   const somma = (k: string) => stagioni.reduce((a, s) => a + (typeof s[k] === "number" ? (s[k] as number) : 0), 0);

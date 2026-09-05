@@ -78,9 +78,10 @@ function fallbackRebu(p: RebuPayload, model: string): RebuVerdetto {
 export async function analisiRebu(db: Db, sid: number, managerId: number, officialId: number, opts?: { forza?: boolean; model?: string }): Promise<RebuVerdetto> {
   const t0 = Date.now();
   const p = await rebuPayload(db, sid, managerId, officialId);
-  const model = opts?.model
+  const ag = await import("./agent");
+  let model = opts?.model
     ?? (await db.prepare("SELECT value FROM settings WHERE key='modello_default'").get() as { value: string } | undefined)?.value
-    ?? (await import("./agent")).DEFAULT_MODEL;
+    ?? ag.DEFAULT_MODEL;
   const key = process.env.OPENCODE_API_KEY ?? "";
   const domanda = `Rebu: ${p.giocatore.nome} (${p.giocatore.ruolo}), offerta ${p.offerta ?? "-"}`;
   const usaAI = (p.rilevante || opts?.forza === true) && key.length > 0;
@@ -94,14 +95,14 @@ export async function analisiRebu(db: Db, sid: number, managerId: number, offici
   try {
     const g = p.giocatore;
     const user = `Chiamato: ${g.nome} (${g.squadra} ${g.ruolo}${g.titolare ? ", titolare XI" : ""}), Qt ${g.qt_a ?? "-"}, FVM ${g.fvm ?? "-"}, riferimento ${g.riferimento.valore}, previsto chiusura ${g.previsto.valore}. Banda stats: ${g.banda.min}-${g.banda.max}, centro ${g.banda.centro} (k ${g.banda.kStats}, tetto rosa ${g.banda.tettoMax}). Segnali: ${g.banda.segnali.map((s) => `${s.etichetta} x${s.effetto} (${s.dettaglio})`).join("; ")}. Stats sintesi: ${JSON.stringify(p.stats?.sintesi ?? null)}. Offerta attuale: ${p.offerta ?? "nessuna"}. Miei: residui ${p.miei.residui}, slot liberi ${JSON.stringify(p.miei.slotLiberi)}. Alternative stesso ruolo: ${p.alternative.map((a) => `${a.nome} banda ${a.bandaMin}-${a.bandaMax} [${a.segnale}]`).join("; ") || "nessuna"}. Pericoli avversari: ${p.pericoli.map((x) => `${x.nome} (residui ${x.residui}, buchi ${x.buchiRuolo}, max ${x.maxSpesa})`).join("; ") || "nessuno"}. Inflazione reparto: ${p.inflazioneReparto}. Dammi verdetto ora.`;
-    const r = await fetch((await import("./agent")).GO_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, messages: [{ role: "system", content: REBU_SYSTEM }, { role: "user", content: user }] }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) throw new Error(`OpenCode ${r.status}`);
-    const testo = (await r.json()).choices?.[0]?.message?.content as string | undefined;
+    const posted = await ag.postChatCompletions(key, model,
+      { messages: [{ role: "system", content: REBU_SYSTEM }, { role: "user", content: user }] }, 10000);
+    let testo = (posted.json as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content as string | undefined;
+    if (posted.cambiato) {
+      model = posted.model;
+      await ag.saveDefaultModel(db, model);
+      if (testo) testo += ` (modello precedente non supportato, passato a ${model} e salvato)`;
+    }
     if (!testo) throw new Error("AI senza risposta");
     const v = extractRebu(testo);
     if (!v) throw new Error("AI senza JSON valido");

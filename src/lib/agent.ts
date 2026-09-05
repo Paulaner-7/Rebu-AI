@@ -190,8 +190,9 @@ export async function runChat(domanda: string, model?: string) {
     + "\nPer tattiche d'asta usa consultaStrategia e cita gli ID KB in fonti. Per numeri su performance passate usa statsGiocatore/classificaStats."
     + (await contestoLive(db, sid, dataset))
     + (modSetting?.value === "off" ? "\nModificatore difesa SPENTO in questa lega: non citarlo e non privilegiare difensori/portieri." : "");
-  const mdl = model || (await db.prepare("SELECT value FROM settings WHERE key='modello_default'").get() as { value: string } | undefined)?.value || DEFAULT_MODEL;
+  let mdl = model || (await db.prepare("SELECT value FROM settings WHERE key='modello_default'").get() as { value: string } | undefined)?.value || DEFAULT_MODEL;
   const usati: string[] = [];
+  let notaModello = "";
 
   if (!key) {
     const f = await fallbackAnswer(db, sid, dataset, versione, domanda);
@@ -205,15 +206,9 @@ export async function runChat(domanda: string, model?: string) {
   ];
   let testo = "";
   for (let i = 0; i < 2; i++) { // 2 giri max: risposte rapide, tool batchati insieme
-    const r = await fetch(GO_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: mdl, messages, tools: TOOL_DEFS, tool_choice: "auto" }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!r.ok) throw new Error(`OpenCode ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    const j = await r.json();
-    const msg = j.choices?.[0]?.message;
+    const { json: j, model: usato, cambiato } = await postChatCompletions(key, mdl, { messages, tools: TOOL_DEFS, tool_choice: "auto" }, 20000);
+    if (cambiato) { notaModello = ` (modello ${mdl} non supportato, passato a ${usato} e salvato)`; mdl = usato; await saveDefaultModel(db, usato); }
+    const msg = (j as { choices?: { message?: { content?: string; tool_calls?: unknown } }[] }).choices?.[0]?.message;
     if (!msg) break;
     messages.push({ role: "assistant", content: msg.content ?? "", tool_calls: msg.tool_calls });
     const calls = msg.tool_calls as { id: string; function: { name: string; arguments: string } }[] | undefined;
@@ -229,13 +224,11 @@ export async function runChat(domanda: string, model?: string) {
   // Se modello esaurisce giri solo con tool (niente testo), una sintesi finale senza tool.
   if (!testo && usati.length > 0) {
     messages.push({ role: "user", content: "Sintetizza ora in max 10 righe col formato obbligatorio. Niente altri tool." });
-    const r = await fetch(GO_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: mdl, messages, tool_choice: "none" }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (r.ok) testo = (await r.json()).choices?.[0]?.message?.content ?? "";
+    try {
+      const s = await postChatCompletions(key, mdl, { messages, tool_choice: "none" }, 20000);
+      testo = (s.json as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content ?? "";
+      if (s.cambiato) { notaModello = ` (modello ${mdl} non supportato, passato a ${s.model} e salvato)`; mdl = s.model; await saveDefaultModel(db, s.model); }
+    } catch { /* sintesi fallita: errore sotto */ }
   }
   if (!testo) throw new Error("AI senza risposta (modello muto). Riprova o cambia modello in pagina Chat.");
   // Guard rosa: alternative fuori Serie A 26/27 vengono droppate, mai mostrate.
@@ -250,7 +243,7 @@ export async function runChat(domanda: string, model?: string) {
     } catch { /* guard indisponibile: contract intatto */ }
   }
   // Blocco JSON resta in scheda contratto: via dal testo leggibile.
-  testo = testo.replace(/```json[\s\S]*?```/, "").replace(/\{[\s\S]*"azione"[\s\S]*\}/, "").replace(/\n{3,}/g, "\n\n").trim();
+  testo = testo.replace(/```json[\s\S]*?```/, "").replace(/\{[\s\S]*"azione"[\s\S]*\}/, "").replace(/\n{3,}/g, "\n\n").trim() + notaModello;
   await logRun(db, sid, domanda, usati, testo, mdl, Date.now() - t0, versione);
   return { testo, contract, model: mdl, via: "ai", versione };
 }
@@ -274,6 +267,42 @@ export async function logRun(db: Db, sid: number, domanda: string, tool: string[
     await db.prepare("INSERT INTO agent_runs (session_id, domanda, tool_calls, output, state_version, latenza_ms) VALUES (?,?,?,?,?,?)")
       .run(sid, domanda, j(tool), j({ risposta: risposta.slice(0, 2000), modello }), ver, lat);
   }
+}
+
+export function isModelNotSupported(status: number, body: string): boolean {
+  if (status !== 400 && status !== 401 && status !== 404) return false;
+  return /not supported|unknown model|modelerror|invalid model|model .* not (found|available|supported)/i.test(body);
+}
+
+// POST a OpenCode con fallback automatico: se il modello non e supportato,
+// riprova una volta col primo modello disponibile e lo segnala (il chiamante
+// puo salvarlo come default). Auto-guarigione se un modello viene ritirato.
+export async function postChatCompletions(
+  key: string, mdl: string, body: Record<string, unknown>, timeoutMs: number
+): Promise<{ json: unknown; model: string; cambiato: boolean }> {
+  const once = (m: string) => fetch(GO_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ ...body, model: m }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  let r = await once(mdl);
+  if (!r.ok) {
+    const txt = await r.text();
+    if (isModelNotSupported(r.status, txt)) {
+      const alt = (await listModels()).map((m) => m.id).filter(Boolean).find((id) => id !== mdl);
+      if (!alt) throw new Error(`Modello ${mdl} non supportato e nessun modello alternativo (verifica chiave OpenCode).`);
+      r = await once(alt);
+      if (!r.ok) throw new Error(`OpenCode ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return { json: await r.json(), model: alt, cambiato: true };
+    }
+    throw new Error(`OpenCode ${r.status}: ${txt.slice(0, 200)}`);
+  }
+  return { json: await r.json(), model: mdl, cambiato: false };
+}
+
+export async function saveDefaultModel(db: Db, model: string) {
+  await db.prepare("INSERT INTO settings (key,value) VALUES ('modello_default',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(model);
 }
 
 export async function listModels(): Promise<{ id: string }[]> {

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setupLeague, startAuction, nominate, sell, ensureExtras } from "../src/lib/auction";
 import { analisiRebu, extractRebu } from "../src/lib/rebu";
+import { GO_MODELS, isModelNotSupported } from "../src/lib/agent";
 
 const SCHEMA = readFileSync(join(process.cwd(), "src", "lib", "schema.sqlite.sql"), "utf8");
 const OTTO = Array.from({ length: 8 }, (_, i) => ({ nome: `M${i + 1}`, nome_squadra: "", note: "", is_owner: i === 0 }));
@@ -55,7 +56,34 @@ describe("extractRebu", () => {
   });
 });
 
+describe("isModelNotSupported", () => {
+  it("rileva modello ritirato, non errori auth generici", () => {
+    expect(isModelNotSupported(401, '{"error":{"type":"ModelError","message":"Model mimo-2.5 is not supported"}}')).toBe(true);
+    expect(isModelNotSupported(401, '{"error":"invalid api key"}')).toBe(false);
+    expect(isModelNotSupported(500, "Model mimo-2.5 is not supported")).toBe(false);
+  });
+});
+
 describe("analisiRebu", () => {
+  it("modello ritirato: fallback automatico e salvataggio nuovo default", async () => {
+    process.env.OPENCODE_API_KEY = "k";
+    let n = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown) => {
+      if (String(url) === GO_MODELS) return new Response(JSON.stringify({ data: [{ id: "flash-x" }] }));
+      n++;
+      if (n === 1) return new Response('{"type":"error","error":{"type":"ModelError","message":"Model mimo-2.5 is not supported"}}', { status: 401 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: aiText(240) } }] }));
+    }));
+    const db = await dbF();
+    const sid = await setupLeague(db, OTTO); await startAuction(db, sid, 0);
+    await nominate(db, sid, 1);
+    const v = await analisiRebu(db, sid, 1, 1);
+    expect(v.via).toBe("ai");
+    expect(v.model).toBe("flash-x");
+    expect(v.prezzo).toBe(240);
+    const saved = await db.prepare("SELECT value FROM settings WHERE key='modello_default'").get() as { value: string };
+    expect(saved.value).toBe("flash-x");
+  });
   it("senza API key: via motore, prezzo = centro banda", async () => {
     delete process.env.OPENCODE_API_KEY;
     const db = await dbF();

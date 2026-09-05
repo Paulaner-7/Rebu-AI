@@ -1,4 +1,5 @@
-import { publicState, defaultManagers } from "@/lib/auction-store";
+import { publicState, writableDb, defaultManagers } from "@/lib/auction-store";
+import { cachedDb } from "@/lib/pgdb";
 import { ChevronDown, Shirt } from "lucide-react";
 import { EmptyState, Eyebrow, Panel, RoleBadge, cx } from "@/components/ui";
 
@@ -8,7 +9,7 @@ const RUOLI = ["P", "D", "C", "A"] as const;
 const TOTALE_ROSA = 25;
 
 export default async function Page() {
-  const { sid, state } = await publicState();
+  const { sid, state } = await publicState(cachedDb(writableDb()));
   if (sid === null || state === null) {
     return (
       <main className="flex flex-col gap-4">

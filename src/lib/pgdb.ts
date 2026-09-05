@@ -15,6 +15,8 @@ export interface Db {
   kind: DbKind;
   prepare(sql: string): Stmt;
   exec(sql: string): Promise<void>;
+  // Handle interno se wrapper (cachedDb): chiave stabile per memo per-processo.
+  inner?: Db;
 }
 
 export function usePostgres(): boolean {
@@ -70,7 +72,7 @@ let pgClient: Sql | null = null;
 function pgConn(): Sql {
   if (!pgClient) {
     const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? "";
-    pgClient = postgres(url, { prepare: false, max: 2, idle_timeout: 10, connect_timeout: 8 });
+    pgClient = postgres(url, { prepare: false, max: 8, idle_timeout: 10, connect_timeout: 8 });
   }
   return pgClient;
 }
@@ -112,6 +114,40 @@ function pgDb(): Db {
         if (s) await conn().unsafe(toPg(s));
       }
     },
+  };
+}
+
+// Wrapper per-request: memoizza letture (SELECT/PRAGMA/WITH) identiche nella
+// stessa richiesta. Si svuota a ogni scrittura (run/exec). Pagina asta passa
+// da ~60 a ~20 roundtrip: managerStates/inflazioneAsta/settings erano ripetute.
+// Va creato fresco a ogni request (stato asta cambia tra richieste).
+export function cachedDb(inner: Db): Db {
+  const cache = new Map<string, Promise<unknown>>();
+  const isRead = (sql: string) => /^\s*(select|pragma|with)\b/i.test(sql);
+  const key = (kind: string, sql: string, p: unknown[]) => kind + "\n" + sql + "\n" + JSON.stringify(p ?? []);
+  return {
+    kind: inner.kind,
+    inner,
+    prepare(sql: string): Stmt {
+      const st = inner.prepare(sql);
+      if (!isRead(sql)) return st;
+      return {
+        get: (...p) => {
+          const k = key("g", sql, p);
+          let pr = cache.get(k);
+          if (!pr) { pr = st.get(...p); cache.set(k, pr); }
+          return pr as ReturnType<Stmt["get"]>;
+        },
+        all: (...p) => {
+          const k = key("a", sql, p);
+          let pr = cache.get(k);
+          if (!pr) { pr = st.all(...p); cache.set(k, pr); }
+          return pr as ReturnType<Stmt["all"]>;
+        },
+        run: (...p) => st.run(...p),
+      };
+    },
+    exec: async (sql) => { cache.clear(); await inner.exec(sql); },
   };
 }
 

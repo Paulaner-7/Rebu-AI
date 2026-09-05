@@ -1,4 +1,5 @@
 import { publicState, writableDb, defaultManagers } from "@/lib/auction-store";
+import { cachedDb } from "@/lib/pgdb";
 import { prezzoRiferimento, tettoConsigliato, inflazioneAsta, prossimeChiamate, verdettoRialzo } from "@/lib/pricing";
 import { Download } from "lucide-react";
 import { Eyebrow, StatusPill } from "@/components/ui";
@@ -13,7 +14,9 @@ export const maxDuration = 60;
 const plain = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 
 export default async function Page() {
-  const { sid, state } = await publicState();
+  // cachedDb: memo letture per-request (stato asta riletto identico ~5 volte).
+  const db = cachedDb(writableDb());
+  const { sid, state } = await publicState(db);
   if (sid === null || state === null) {
     return (
       <main className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
@@ -26,7 +29,6 @@ export default async function Page() {
       </main>
     );
   }
-  const db = writableDb();
   const owner = state.managers.find((m) => m.is_owner === 1) ?? state.managers[0];
   const nom = state.nomination;
   const [infl, next, rif, tetto, verdetto, topPagatiRows, affariRows] = await Promise.all([

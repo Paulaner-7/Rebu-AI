@@ -28,6 +28,29 @@ function median(ns: (number | null)[]): number | null {
   return v.length % 2 ? v[m] : Math.round((v[m - 1] + v[m]) / 2);
 }
 
+// Statistiche pure per riga giocatore: stesse formule di prezzoRiferimento/
+// prezzoPrevisto ma senza query (usate dal batch di rimanentiRuolo).
+type StatsRow = {
+  pma: number | null; fvm: number | null; qt: number | null;
+  qt_2526: number | null; qt_2425: number | null; qt_2324: number | null; qt_2223: number | null;
+};
+
+function rifFromStats(r: StatsRow): number | null {
+  if (r.pma != null) return Math.round(r.pma * 500);
+  if (r.fvm != null) return Math.round(r.fvm / 2);
+  return median([r.qt_2526, r.qt_2425, r.qt_2324, r.qt_2223, r.qt]);
+}
+
+function prevFromStats(r: StatsRow): number | null {
+  const base = r.fvm != null ? r.fvm / 2 : median([r.qt_2526, r.qt_2425, r.qt_2324, r.qt_2223, r.qt]);
+  if (base == null) return null;
+  let k = 1;
+  if (r.qt_2526 != null && r.qt_2425 != null && r.qt_2425 > 0) {
+    k = Math.min(1.3, Math.max(0.7, 0.5 + 0.5 * (r.qt_2526 / r.qt_2425)));
+  }
+  return Math.round(base * k);
+}
+
 async function mediaReparto(db: Db, dataset: string, ruolo: string): Promise<number> {
   const r = await db.prepare("SELECT AVG(qt_a) AS m FROM players WHERE dataset_version=? AND ruolo_classic=?").get(dataset, ruolo) as { m: number | null };
   return Math.round(r.m ?? 1);
@@ -150,10 +173,15 @@ async function rankAll(db: Db, sid: number, managerId: number) {
   if (!mine) throw new Error("Manager assente");
   const mod = (await db.prepare("SELECT value FROM settings WHERE key='modificatore_default'").get() as { value: string } | undefined)?.value === "on";
   const avail = await db.prepare(
-    `SELECT p.official_id AS o, p.nome, p.squadra, p.ruolo_classic AS ruolo, p.qt_a AS qt, p.fvm, p.is_titolare AS tit
+    `SELECT p.official_id AS o, p.nome, p.squadra, p.ruolo_classic AS ruolo, p.qt_a AS qt, p.fvm, p.pma,
+            p.qt_2526, p.qt_2425, p.qt_2324, p.qt_2223, p.is_titolare AS tit
      FROM players p WHERE p.dataset_version=?
        AND NOT EXISTS (SELECT 1 FROM purchases pu WHERE pu.session_id=? AND pu.player_id=p.id)`
-  ).all(s.d, sid) as { o: number; nome: string; squadra: string; ruolo: string; qt: number | null; fvm: number | null; tit: number }[];
+  ).all(s.d, sid) as {
+    o: number; nome: string; squadra: string; ruolo: string; qt: number | null; fvm: number | null;
+    pma: number | null; qt_2526: number | null; qt_2425: number | null; qt_2324: number | null;
+    qt_2223: number | null; tit: number;
+  }[];
   const maxQt: Record<string, number> = {};
   const pref = await db.prepare("SELECT official_id AS o, tipo FROM preferenze WHERE dataset_version=?").all(s.d) as { o: number; tipo: string }[];
   const prefMap = new Map(pref.map((p) => [p.o, p.tipo]));
@@ -176,7 +204,8 @@ async function rankAll(db: Db, sid: number, managerId: number) {
     if (mod && r.ruolo === "P" && (r.qt ?? 0) >= 15) { bonusMod += 8; motivi.push("modificatore: P clean-sheet"); }
     if (vuotiMiei > 0) motivi.push(`buco rosa: ${vuotiMiei} slot ${r.ruolo} liberi`);
     const score = Math.round(100 * need * (0.5 + 0.5 * quality) + (r.tit ? 10 : 0) + bonusMod + scarsita);
-    return { official_id: r.o, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo, qt: r.qt, fvm: r.fvm, tit: r.tit, score, motivi,
+    return { official_id: r.o, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo, qt: r.qt, fvm: r.fvm, tit: r.tit,
+      pma: r.pma, qt_2526: r.qt_2526, qt_2425: r.qt_2425, qt_2324: r.qt_2324, qt_2223: r.qt_2223, score, motivi,
       formula: "100×need×(0.5+0.5×qualità) + 10 se XI + 8 se bonusMod + 150 se pupillo (X esclusi) + 2×scarsità" };
   });
   rank.sort((a, b) => b.score - a.score);
@@ -194,19 +223,36 @@ export async function prossimeChiamate(db: Db, sid: number, managerId: number, t
 
 // 4b. rimanentiRuolo: dopo chiamata di ruolo R, lista ordinata per score con
 // statistiche (Qt, FVM, titolarità) + riferimento e tetto squadra owner.
+// Batch: rankAll carica già tutte le stats; inflazione/stato manager/tettoMax
+// calcolati 1 volta sola (tettoMax identico per tutti i giocatori del ruolo).
+// Prima era N+1: ~10 query × 30 giocatori su pool di 2 connessioni.
 export async function rimanentiRuolo(db: Db, sid: number, managerId: number, ruolo: string, limit = 30) {
-  const ds = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  const s = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid)) as { d: string } | undefined;
+  if (!s) throw new Error("Sessione assente");
   const { rank } = await rankAll(db, sid, managerId);
-  return await Promise.all(rank
-    .filter((r) => r.ruolo === ruolo)
-    .slice(0, Math.min(Math.max(limit, 1), 60))
-    .map(async (r) => ({
+  const infl = (await inflazioneAsta(db, sid)).reparti[ruolo]?.valore ?? 1;
+  const ms = await managerStates(db, sid);
+  const mine = ms.find((x) => x.id === managerId);
+  if (!mine) throw new Error("Manager assente");
+  const slot = mine.slot[ruolo];
+  const okSlot = slot && slot.usati < slot.totali;
+  const vuoti = Object.values(mine.slot).reduce((a, x) => a + (x.totali - x.usati), 0);
+  const tettoMax = okSlot ? Math.max(0, mine.residui - (vuoti - 1)) : 0;
+  // Media reparto lazy: serve solo a giocatori senza alcun dato individuale.
+  let media: number | null = null;
+  const mediaOnce = async () => (media ??= await mediaReparto(db, s.d, ruolo));
+  const picked = rank.filter((r) => r.ruolo === ruolo).slice(0, Math.min(Math.max(limit, 1), 60));
+  return await Promise.all(picked.map(async (r) => {
+    const rif = rifFromStats(r) ?? (await mediaOnce());
+    const prev = prevFromStats(r) ?? (await mediaOnce());
+    const adattato = Math.round(prev * infl);
+    return {
       o: r.official_id, nome: r.nome, squadra: r.squadra, ruolo: r.ruolo,
       qt: r.qt, fvm: r.fvm, titolare: r.tit,
-      rif: (await prezzoRiferimento(db, ds, r.official_id)).valore,
-      tetto: (await tettoConsigliato(db, sid, managerId, r.official_id)).consigliato,
+      rif, tetto: Math.min(adattato, tettoMax),
       score: r.score, motivi: r.motivi,
-    })));
+    };
+  }));
 }
 
 // 4c. verdettoRialzo: dopo ogni chiamata, Rebu AI dice ad owner se ALZARE,

@@ -35,7 +35,13 @@ export async function leagueRules(db: Db) {
   return { crediti: Number(s.get("crediti") ?? FALLBACK.crediti), rosa };
 }
 
+// Eseguito 1 volta per processo per handle DB reale (anche se arriva wrapper
+// cachedDb nuovo a ogni request). Idempotente: rientro innocuo.
+const extrasDone = new WeakSet<object>();
+
 export async function ensureExtras(db: Db) {
+  const key = db.inner ?? db;
+  if (extrasDone.has(key)) return;
   if (db.kind === "pg") {
     const cols = (await db.prepare(
       "SELECT column_name AS name FROM information_schema.columns WHERE table_name='auction_sessions'"
@@ -53,6 +59,7 @@ export async function ensureExtras(db: Db) {
     dataset_version TEXT NOT NULL REFERENCES dataset_versions(version),
     official_id INTEGER NOT NULL, tipo TEXT NOT NULL CHECK (tipo IN ('W','X')), nota TEXT DEFAULT '',
     PRIMARY KEY (dataset_version, official_id))`);
+  extrasDone.add(key);
 }
 
 export async function setPreferenza(db: Db, dataset: string, officialId: number, tipo: "W" | "X" | null) {

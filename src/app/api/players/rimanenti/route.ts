@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { writableDb } from "@/lib/auction-store";
+import { cachedDb } from "@/lib/pgdb";
 import { requireAuth } from "@/lib/api-auth";
-import { getState } from "@/lib/auction";
+import { ensureExtras } from "@/lib/auction";
 import { rimanentiRuolo } from "@/lib/pricing";
 
 export const runtime = "nodejs";
@@ -16,12 +17,15 @@ export async function GET(req: Request) {
   if (!sid || !["P", "D", "C", "A"].includes(ruolo)) {
     return NextResponse.json({ ok: false, code: "PARAM", message: "sessionId e ruolo P/D/C/A obbligatori" }, { status: 400 });
   }
-  const st = await getState(writableDb(), sid);
-  if (!st) return NextResponse.json({ ok: false, code: "ASTA" }, { status: 404 });
-  const owner = st.managers.find((m) => m.is_owner === 1) ?? st.managers[0];
+  const db = cachedDb(writableDb());
+  await ensureExtras(db);
+  const sess = await db.prepare("SELECT id FROM auction_sessions WHERE id=?").get(sid);
+  if (!sess) return NextResponse.json({ ok: false, code: "ASTA" }, { status: 404 });
+  const owner = (await db.prepare("SELECT id FROM managers ORDER BY is_owner DESC, id LIMIT 1").get()) as { id: number } | undefined;
+  if (!owner) return NextResponse.json({ ok: false, code: "ASTA", message: "Squadre assenti" }, { status: 404 });
   const limit = Math.min(Math.max(Number(u.searchParams.get("limit") ?? 30), 1), 60);
   return NextResponse.json({
     ok: true,
-    data: await rimanentiRuolo(writableDb(), sid, owner.id, ruolo, limit),
+    data: await rimanentiRuolo(db, sid, owner.id, ruolo, limit),
   });
 }

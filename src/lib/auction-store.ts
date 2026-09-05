@@ -28,11 +28,11 @@ export function writableDb(): Db {
   return handle;
 }
 
-async function boot(): Promise<Db> {
-  const db = writableDb();
-  if (db.kind === "sqlite") ensureDataset();
-  await ensureExtras(db);
-  return db;
+async function boot(db?: Db): Promise<Db> {
+  const d = db ?? writableDb();
+  if (d.kind === "sqlite") ensureDataset();
+  await ensureExtras(d);
+  return d;
 }
 
 // Nomi default: in prod da tabella managers, in locale da dati/avversari.csv.
@@ -60,14 +60,15 @@ export async function defaultManagers(): Promise<{ nome: string; nome_squadra: s
   return fallback();
 }
 
-export async function latestSessionId(): Promise<number | null> {
-  const db = await boot();
-  const r = (await db.prepare("SELECT id FROM auction_sessions ORDER BY id DESC LIMIT 1").get()) as { id: number } | undefined;
+export async function latestSessionId(db?: Db): Promise<number | null> {
+  const d = await boot(db);
+  const r = (await d.prepare("SELECT id FROM auction_sessions ORDER BY id DESC LIMIT 1").get()) as { id: number } | undefined;
   return r?.id ?? null;
 }
 
-export async function publicState() {
-  const sid = await latestSessionId();
+export async function publicState(db?: Db) {
+  const sid = await latestSessionId(db);
   if (!sid) return { session: null as null | { id: number }, sid: null as number | null, state: null };
-  return { session: { id: sid }, sid, state: await getState(writableDb(), sid) };
+  const d = db ?? writableDb();
+  return { session: { id: sid }, sid, state: await getState(d, sid) };
 }

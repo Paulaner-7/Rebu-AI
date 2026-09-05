@@ -1,11 +1,12 @@
-import { publicState } from "@/lib/auction-store";
+import { publicState, writableDb } from "@/lib/auction-store";
+import { cachedDb } from "@/lib/pgdb";
 import { Eyebrow } from "@/components/ui";
 import SettingsForm from "./settings-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const { state } = (await publicState());
+  const { state } = await publicState(cachedDb(writableDb()));
   const stato = state?.session.stato ?? "";
   const editable = stato === "" || stato === "PRONTA";
   const astaAperta = stato === "LIVE" || stato === "PAUSA";

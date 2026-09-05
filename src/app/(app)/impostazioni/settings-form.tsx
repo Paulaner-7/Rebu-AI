@@ -13,6 +13,7 @@ export default function SettingsForm({ editable, astaAperta }: { editable: boole
   const [mgrs, setMgrs] = useState<Mgr[]>([]);
   const [msg, setMsg] = useState("");
   const [log, setLog] = useState("");
+  const [statLog, setStatLog] = useState("");
 
   useEffect(() => {
     fetch("/api/league").then((r) => r.json()).then((j) => {
@@ -119,6 +120,20 @@ export default function SettingsForm({ editable, astaAperta }: { editable: boole
           Reimporta dataset {astaAperta ? "(vietato ad asta aperta)" : ""}
         </button>
         {log && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-bg p-3 font-mono text-xs text-muted">{log}</pre>}
+      </Panel>
+
+      <Panel>
+        <PanelHead icon={RefreshCw} title="Statistiche 26/27" hint="auto marted\u00ec 07:00" />
+        <button onClick={async () => {
+          setStatLog("Sync in corso (Understat + fantacalcio.it)…");
+          const r = await fetch("/api/dataset/sync-stats", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+          const j = await r.json();
+          setStatLog(j.ok
+            ? j.data.jobs.map((x: { label: string; stato: string; righe: number; joined: number; errore?: string }) => `${x.stato.toUpperCase()} ${x.label}: ${x.righe} righe, join ${x.joined}${x.errore ? ` (${x.errore})` : ""}`).join("\n")
+            : `Bloccato: ${j.code ?? ""} ${j.errore ?? ""}`);
+        }} className={cx(btnGhost, "w-full")}>Aggiorna stats ora</button>
+        {statLog && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-bg p-3 font-mono text-xs text-muted">{statLog}</pre>}
+        <p className="mt-2 text-xs text-muted">Voti e xG freschi prima dell&apos;asta: Rebu valuta su dati aggiornati.</p>
       </Panel>
 
       <Panel className="border-danger/30">

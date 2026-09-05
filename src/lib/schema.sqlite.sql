@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER REFERENCES auction_sessions(id),
   domanda TEXT NOT NULL, tool_calls TEXT DEFAULT '[]', output TEXT DEFAULT '{}',
-  state_version INTEGER, latenza_ms INTEGER, created_at TEXT DEFAULT (datetime('now'))
+  state_version INTEGER, latenza_ms INTEGER, created_at TEXT DEFAULT (datetime('now')),
+  official_id INTEGER DEFAULT NULL, verdetto TEXT DEFAULT NULL
 );
 CREATE TABLE IF NOT EXISTS strategy_notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

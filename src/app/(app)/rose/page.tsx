@@ -8,8 +8,35 @@ export const dynamic = "force-dynamic";
 const RUOLI = ["P", "D", "C", "A"] as const;
 const TOTALE_ROSA = 25;
 
+type VerdettoRose = { azione: string; prezzo: number; via: string };
+
+async function verdettiMappa(db: ReturnType<typeof writableDb>, sid: number): Promise<Map<string, { prezzo: number; verdetto: VerdettoRose }>> {
+  const mappa = new Map<string, { prezzo: number; verdetto: VerdettoRose }>();
+  try {
+    const acquisti = (await db.prepare(
+      `SELECT pl.official_id AS o, pl.nome, pl.squadra, pu.prezzo
+       FROM purchases pu JOIN players pl ON pl.id = pu.player_id JOIN managers m ON m.id = pu.manager_id
+       WHERE pu.session_id=? AND m.is_owner=1`
+    ).all(sid)) as { o: number; nome: string; squadra: string; prezzo: number }[];
+    const runs = (await db.prepare(
+      "SELECT official_id AS o, verdetto FROM agent_runs WHERE session_id=? AND official_id IS NOT NULL ORDER BY id"
+    ).all(sid)) as { o: number; verdetto: string | null }[];
+    const ultimi = new Map<number, VerdettoRose>();
+    for (const r of runs) {
+      if (!r.verdetto) continue;
+      try { ultimi.set(r.o, JSON.parse(r.verdetto) as VerdettoRose); } catch { /* riga corrotta: skip */ }
+    }
+    for (const a of acquisti) {
+      const v = ultimi.get(a.o);
+      if (v) mappa.set(`${a.nome}|${a.squadra}`, { prezzo: a.prezzo, verdetto: v });
+    }
+  } catch { /* DB legacy senza colonne: nessun chip */ }
+  return mappa;
+}
+
 export default async function Page() {
-  const { sid, state } = await publicState(cachedDb(writableDb()));
+  const db = cachedDb(writableDb());
+  const { sid, state } = await publicState(db);
   if (sid === null || state === null) {
     return (
       <main className="flex flex-col gap-4">
@@ -25,6 +52,8 @@ export default async function Page() {
       </main>
     );
   }
+
+  const verdetti = await verdettiMappa(db, sid);
 
   return (
     <main className="flex flex-col gap-4">
@@ -66,13 +95,26 @@ export default async function Page() {
                   {fatti === 0 ? "Rosa vuota" : `Vedi ${fatti} giocatori`}
                 </summary>
                 <ul className="border-t border-line pt-1">
-                  {m.rosa.map((g, i) => (
-                    <li key={i} className="flex items-center gap-2 border-b border-line/50 py-1.5 text-sm last:border-0">
-                      <RoleBadge r={g.ruolo} />
-                      <span className="min-w-0 flex-1 truncate">{g.nome} <span className="text-faint">· {g.squadra}</span></span>
-                      <span className="tnum font-mono text-muted">{g.prezzo}</span>
-                    </li>
-                  ))}
+                  {m.rosa.map((g, i) => {
+                    const rv = m.is_owner === 1 ? verdetti.get(`${g.nome}|${g.squadra}`) : undefined;
+                    const delta = rv && rv.verdetto.azione !== "PASSA" ? rv.prezzo - rv.verdetto.prezzo : null;
+                    return (
+                      <li key={i} className="flex items-center gap-2 border-b border-line/50 py-1.5 text-sm last:border-0">
+                        <RoleBadge r={g.ruolo} />
+                        <span className="min-w-0 flex-1 truncate">{g.nome} <span className="text-faint">· {g.squadra}</span></span>
+                        {rv && (
+                          <span className={cx(
+                            "tnum shrink-0 rounded-full px-2 py-0.5 font-mono text-[11px]",
+                            rv.verdetto.azione === "PASSA" ? "bg-danger/15 text-danger"
+                            : delta != null && delta <= 0 ? "bg-d/15 text-d" : "bg-signal/15 text-signal"
+                          )}>
+                            Rebu {rv.verdetto.azione === "PASSA" ? "PASSA" : `${rv.verdetto.prezzo}`}{delta != null ? ` · ${delta <= 0 ? delta : `+${delta}`}` : ""}
+                          </span>
+                        )}
+                        <span className="tnum font-mono text-muted">{g.prezzo}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </details>
             </Panel>

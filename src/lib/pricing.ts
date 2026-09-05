@@ -1,5 +1,6 @@
 import type { Db } from "./pgdb";
 import { managerStates, leagueRules } from "./auction";
+import { statsGiocatore } from "./stats";
 
 // Motore prezzi deterministico (tool futuri agente AI).
 // PMA assente nei PDF 26/27 -> riferimento = FVM/2, fallback mediano storiche,
@@ -297,6 +298,126 @@ export async function verdettoRialzo(db: Db, sid: number, managerId: number, off
     verdetto: "MOLLA", titolo: "Molla: fuori range",
     dettaglio: `Offerta ${offerta} oltre range (consigliato ${t.consigliato} + 10 = ${limite}). Stop: non inseguire.`,
     numeri,
+  };
+}
+
+// 5b. bandaStats (Rebu): tetto modificato dalle statistiche reali.
+// Ibrido scelto in griglia: il motore produce banda + segnali quantificati,
+// l'AI sceglie il punto dentro la banda e motiva. Mai numeri inventati.
+// 4 segnali (griglia Q5): scarto gol-xG, forma 26/27, affidabilita, rigorista.
+// Banda = centro +/-15% (griglia Q5), tetto mai sopra tettoMax rosa.
+
+export type SegnaleStats = {
+  id: "scarto_xg" | "forma_live" | "affidabilita" | "rigorista" | "assenti";
+  etichetta: string; effetto: number; dettaglio: string;
+};
+
+export type BandaStats = {
+  centro: number; min: number; max: number;
+  kStats: number; segnali: SegnaleStats[];
+  consigliatoBase: number; tettoMax: number;
+  formula: string;
+  input: { consigliato: number; tettoMax: number; kStats: number };
+};
+
+export type FattoreStatsInput = {
+  stagioni_coperte: number;
+  scarto_gol_meno_xg: number;
+  live_fantamedia: number | null;
+  live_presenze: number | null;
+  presenze_medie: number | null;
+  rigori_segnati: number;
+};
+
+const t3 = (n: number) => Math.round(n * 1000) / 1000;
+
+// Pura: stesso k ovunque (motore, test, batch). Nessuna query qui dentro.
+export function fattoreStats(s: FattoreStatsInput): { k: number; segnali: SegnaleStats[] } {
+  const segnali: SegnaleStats[] = [];
+  let k = 1;
+  const daiDati = s.stagioni_coperte >= 2;
+  if (!daiDati) {
+    return { k: 1, segnali: [{ id: "assenti", etichetta: "stats insufficienti", effetto: 1, dettaglio: "meno di 2 stagioni coperte: banda neutra" }] };
+  }
+  // 1. Scarto gol-xG medio per stagione: + = sovrarendimento (rischio
+  // regressione, KB-STA-01), - = gol meritati non arrivati (scommessa).
+  const medio = s.scarto_gol_meno_xg / s.stagioni_coperte;
+  if (medio >= 1.5) {
+    k *= 0.93;
+    segnali.push({ id: "scarto_xg", etichetta: "sovrarendimento", effetto: 0.93, dettaglio: `gol sopra xG di ${medio >= 0 ? "+" : ""}${Math.round(medio * 10) / 10}/stagione: possibile regressione` });
+  } else if (medio <= -1.5) {
+    k *= 1.07;
+    segnali.push({ id: "scarto_xg", etichetta: "scommessa xG", effetto: 1.07, dettaglio: `gol sotto xG di ${Math.round(medio * 10) / 10}/stagione: gol meritati in arrivo` });
+  } else {
+    segnali.push({ id: "scarto_xg", etichetta: "gol in linea xG", effetto: 1, dettaglio: `scarto ${medio >= 0 ? "+" : ""}${Math.round(medio * 10) / 10}/stagione: rendimento sostenibile` });
+  }
+  // 2. Forma 26/27 in corso: FM live su almeno 4 presenze.
+  if (s.live_fantamedia != null && (s.live_presenze ?? 0) >= 4) {
+    const fm = s.live_fantamedia;
+    const e = fm >= 7 ? 1.05 : fm >= 6.5 ? 1.02 : fm >= 6 ? 1 : 0.95;
+    k *= e;
+    segnali.push({ id: "forma_live", etichetta: e > 1 ? "forma live alta" : e < 1 ? "forma live bassa" : "forma live media", effetto: e, dettaglio: `FM 26/27 ${fm} su ${s.live_presenze} presenze` });
+  } else {
+    segnali.push({ id: "forma_live", etichetta: "forma live n.d.", effetto: 1, dettaglio: "meno di 4 presenze 26/27: nessun aggiustamento" });
+  }
+  // 3. Affidabilita: presenze medie per stagione coperta.
+  if (s.presenze_medie != null) {
+    const e = s.presenze_medie >= 30 ? 1.03 : s.presenze_medie < 20 ? 0.96 : 1;
+    k *= e;
+    segnali.push({ id: "affidabilita", etichetta: e > 1 ? "titolare fisso" : e < 1 ? "rotazione/fragile" : "presenze normali", effetto: e, dettaglio: `${Math.round(s.presenze_medie * 10) / 10} presenze/stagione` });
+  }
+  // 4. Rigorista: gol da dischetto = rendimento a costo zero.
+  if (s.rigori_segnati > 0) {
+    k *= 1.03;
+    segnali.push({ id: "rigorista", etichetta: "rigorista", effetto: 1.03, dettaglio: `${s.rigori_segnati} rigori segnati nel periodo` });
+  } else {
+    segnali.push({ id: "rigorista", etichetta: "non rigorista", effetto: 1, dettaglio: "nessun rigore segnato nel periodo" });
+  }
+  return { k: Math.min(1.15, Math.max(0.85, t3(k))), segnali };
+}
+
+// Estrae l'input di fattoreStats dall'output di statsGiocatore (stagioni fuse).
+export function inputBandaDaStats(s: {
+  stagioni: Record<string, unknown>[];
+  sintesi: { stagioni_coperte: number; scarto_gol_meno_xg: number };
+}): FattoreStatsInput {
+  const live = s.stagioni.find((x) => x.stagione === "2026-27") as
+    | { fantamedia?: unknown; presenze?: unknown } | undefined;
+  const pres = s.stagioni
+    .map((x) => x.presenze)
+    .filter((v): v is number => typeof v === "number");
+  return {
+    stagioni_coperte: s.sintesi.stagioni_coperte,
+    scarto_gol_meno_xg: s.sintesi.scarto_gol_meno_xg,
+    live_fantamedia: typeof live?.fantamedia === "number" ? live.fantamedia : null,
+    live_presenze: typeof live?.presenze === "number" ? live.presenze : null,
+    presenze_medie: pres.length ? pres.reduce((a, b) => a + b, 0) / pres.length : null,
+    rigori_segnati: s.stagioni.reduce((a, x) => a + (typeof x.rigori_segnati === "number" ? (x.rigori_segnati as number) : 0), 0),
+  };
+}
+
+export async function bandaGiocatore(db: Db, sid: number, managerId: number, officialId: number): Promise<BandaStats> {
+  const t = await tettoConsigliato(db, sid, managerId, officialId);
+  const ds = (await db.prepare("SELECT dataset_version AS d FROM auction_sessions WHERE id=?").get(sid) as { d: string }).d;
+  let f = { k: 1, segnali: [] as SegnaleStats[] };
+  try {
+    const s = await statsGiocatore(db, ds, officialId);
+    f = fattoreStats(inputBandaDaStats({
+      stagioni: s.stagioni as unknown as Record<string, unknown>[],
+      sintesi: s.sintesi as { stagioni_coperte: number; scarto_gol_meno_xg: number },
+    }));
+  } catch {
+    f = { k: 1, segnali: [{ id: "assenti", etichetta: "stats assenti", effetto: 1, dettaglio: "tabella stats vuota per il giocatore: banda neutra" }] };
+  }
+  const centro = Math.min(Math.round(t.consigliato * f.k), t.tettoMax);
+  const min = Math.round(centro * 0.85);
+  const max = Math.min(Math.round(centro * 1.15), t.tettoMax);
+  return {
+    centro, min, max,
+    kStats: f.k, segnali: f.segnali,
+    consigliatoBase: t.consigliato, tettoMax: t.tettoMax,
+    formula: "centro = min(consigliato x kStats, tettoMax); banda = centro +/-15% (cap tettoMax)",
+    input: { consigliato: t.consigliato, tettoMax: t.tettoMax, kStats: f.k },
   };
 }
 

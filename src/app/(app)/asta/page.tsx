@@ -5,7 +5,7 @@ import { Download } from "lucide-react";
 import { Eyebrow, StatusPill } from "@/components/ui";
 import Console from "./console";
 import Live from "./live";
-import AiDock from "./ai-dock";
+import RebuPanel from "./rebu-panel";
 import TeamsRail from "./teams-rail";
 
 export const dynamic = "force-dynamic";
@@ -104,9 +104,14 @@ export default async function Page() {
           )}
         </main>
 
-        {/* ——— DESTRA: chat ——— */}
+        {/* ——— DESTRA: Rebu ——— */}
         <div className="order-3 lg:col-span-2 xl:col-span-1">
-          <AiDock />
+          <RebuPanel
+            sid={sid} ownerId={owner?.id ?? null}
+            nomination={nom ? { o: nom.o, nome: nom.nome } : null}
+            offerta={state.ultimaChiamata?.prezzo ?? null}
+            stato={state.session.stato}
+          />
         </div>
       </div>
     </div>

@@ -39,22 +39,24 @@ export async function leagueRules(db: Db) {
 // cachedDb nuovo a ogni request). Idempotente: rientro innocuo.
 const extrasDone = new WeakSet<object>();
 
+async function ensureColumn(db: Db, table: string, column: string, ddl: string) {
+  if (db.kind === "pg") {
+    const cols = (await db.prepare(
+      "SELECT column_name AS name FROM information_schema.columns WHERE table_name='" + table + "'"
+    ).all()) as { name: string }[];
+    if (!cols.some((c) => c.name === column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  } else {
+    const cols = (await db.prepare(`PRAGMA table_info(${table})`).all()) as { name: string }[];
+    if (!cols.some((c) => c.name === column)) await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
+}
+
 export async function ensureExtras(db: Db) {
   const key = db.inner ?? db;
   if (extrasDone.has(key)) return;
-  if (db.kind === "pg") {
-    const cols = (await db.prepare(
-      "SELECT column_name AS name FROM information_schema.columns WHERE table_name='auction_sessions'"
-    ).all()) as { name: string }[];
-    if (!cols.some((c) => c.name === "current_nomination")) {
-      await db.exec("ALTER TABLE auction_sessions ADD COLUMN current_nomination INTEGER");
-    }
-  } else {
-    const cols = (await db.prepare("PRAGMA table_info(auction_sessions)").all()) as { name: string }[];
-    if (!cols.some((c) => c.name === "current_nomination")) {
-      await db.exec("ALTER TABLE auction_sessions ADD COLUMN current_nomination INTEGER");
-    }
-  }
+  await ensureColumn(db, "auction_sessions", "current_nomination", "INTEGER");
+  await ensureColumn(db, "agent_runs", "official_id", "INTEGER");
+  await ensureColumn(db, "agent_runs", "verdetto", "TEXT");
   await db.exec(`CREATE TABLE IF NOT EXISTS preferenze (
     dataset_version TEXT NOT NULL REFERENCES dataset_versions(version),
     official_id INTEGER NOT NULL, tipo TEXT NOT NULL CHECK (tipo IN ('W','X')), nota TEXT DEFAULT '',

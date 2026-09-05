@@ -261,11 +261,19 @@ export function extractContract(testo: string): Contract | null {
   try { return validateContract(JSON.parse(m[1] ?? m[0])); } catch { return null; }
 }
 
-async function logRun(db: Db, sid: number, domanda: string, tool: string[], risposta: string, modello: string, lat: number, ver: number) {
+export async function logRun(db: Db, sid: number, domanda: string, tool: string[], risposta: string, modello: string, lat: number, ver: number,
+  extra?: { official_id?: number | null; verdetto?: object | null }) {
   const pg = (await import("./pgdb")).usePostgres();
   const j = (o: object): object | string => (pg ? o : JSON.stringify(o));
-  await db.prepare("INSERT INTO agent_runs (session_id, domanda, tool_calls, output, state_version, latenza_ms) VALUES (?,?,?,?,?,?)")
-    .run(sid, domanda, j(tool), j({ risposta: risposta.slice(0, 2000), modello }), ver, lat);
+  const v = extra?.verdetto ? JSON.stringify(extra.verdetto) : null;
+  try {
+    await db.prepare("INSERT INTO agent_runs (session_id, domanda, tool_calls, output, state_version, latenza_ms, official_id, verdetto) VALUES (?,?,?,?,?,?,?,?)")
+      .run(sid, domanda, j(tool), j({ risposta: risposta.slice(0, 2000), modello }), ver, lat, extra?.official_id ?? null, v);
+  } catch {
+    // DB legacy senza colonne verdetto (ensureExtras non ancora passato): insert base.
+    await db.prepare("INSERT INTO agent_runs (session_id, domanda, tool_calls, output, state_version, latenza_ms) VALUES (?,?,?,?,?,?)")
+      .run(sid, domanda, j(tool), j({ risposta: risposta.slice(0, 2000), modello }), ver, lat);
+  }
 }
 
 export async function listModels(): Promise<{ id: string }[]> {
